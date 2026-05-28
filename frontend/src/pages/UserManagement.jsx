@@ -52,6 +52,7 @@ export default function UserManagement() {
   const [teachers, setTeachers] = useState([]);
   const [supervisors, setSupervisors] = useState([]);
   const [principals, setPrincipals] = useState([]);
+  const [schools, setSchools] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterRole, setFilterRole] = useState("semua");
@@ -67,15 +68,18 @@ export default function UserManagement() {
   const load = async () => {
     setLoading(true);
     try {
-      const [u, t, s, p] = await Promise.all([
+      const [u, t, s, p, sc] = await Promise.all([
         api.get("/users"),
         api.get("/teachers"),
         api.get("/supervisors"),
         api.get("/principals"),
+        api.get("/schools"),
       ]);
       setUsers(u.data);
       setTeachers(t.data);
       setSupervisors(s.data);
+      setPrincipals(p.data);
+      setSchools(sc.data);
       setPrincipals(p.data);
     } finally {
       setLoading(false);
@@ -90,6 +94,29 @@ export default function UserManagement() {
     if (form.role === "kepala_sekolah") return principals.map((x) => ({ id: x.id, label: `${x.name}` }));
     return [];
   }, [form.role, teachers, supervisors, principals]);
+
+  const schoolMap = useMemo(() => Object.fromEntries(schools.map((s) => [s.id, s.school_name])), [schools]);
+
+  const linkedInfo = useMemo(() => {
+    const pid = form.linked_profile_id;
+    if (!pid || pid === "none") return null;
+    if (form.role === "guru") {
+      const t = teachers.find((x) => x.id === pid);
+      if (!t) return null;
+      return { label: "Sekolah Penugasan", value: schoolMap[t.school_id] || "Belum ditempatkan", extra: t.nip ? `NIP: ${t.nip}` : null };
+    }
+    if (form.role === "kepala_sekolah") {
+      const p = principals.find((x) => x.id === pid);
+      if (!p) return null;
+      return { label: "Sekolah yang Dipimpin", value: schoolMap[p.school_id] || "Belum ditugaskan", extra: p.nip ? `NIP: ${p.nip}` : null };
+    }
+    if (form.role === "pengawas") {
+      const s = supervisors.find((x) => x.id === pid);
+      if (!s) return null;
+      return { label: "Wilayah Kerja", value: s.work_area || "Belum diatur", extra: s.nip ? `NIP: ${s.nip}` : null };
+    }
+    return null;
+  }, [form.linked_profile_id, form.role, teachers, principals, supervisors, schoolMap]);
 
   const filtered = useMemo(() => {
     return users.filter((u) => {
@@ -288,6 +315,14 @@ export default function UserManagement() {
                     {profileOptions.map((o) => <SelectItem key={o.id} value={o.id}>{o.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
+                {linkedInfo && (
+                  <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2.5 text-sm" data-testid="linked-profile-info">
+                    <div className="text-[11px] uppercase tracking-wider font-semibold text-emerald-700">{linkedInfo.label}</div>
+                    <div className="font-medium text-slate-900 mt-0.5">{linkedInfo.value}</div>
+                    {linkedInfo.extra && <div className="text-xs text-slate-600 mt-0.5">{linkedInfo.extra}</div>}
+                    <div className="text-[10px] text-slate-500 mt-1">Informasi otomatis dari data profil yang dipilih (tidak dapat diubah di sini).</div>
+                  </div>
+                )}
               </div>
             )}
             <DialogFooter>

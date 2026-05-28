@@ -113,6 +113,56 @@ def clean(d: dict) -> dict:
     d.pop("password_hash", None)
     return d
 
+PROFILE_COLLECTIONS = {
+    "guru": "teachers",
+    "pengawas": "supervisors",
+    "kepala_sekolah": "principals",
+}
+
+async def sync_user_profile_link(user_id: str, role: str, new_profile_id, old_profile_id=None):
+    """Keep users.linked_profile_id and profile.user_id consistent.
+
+    - Clears profile.user_id on the old profile (if any).
+    - Ensures no other user is linked to new_profile_id.
+    - Sets new profile.user_id = user_id.
+    """
+    coll_name = PROFILE_COLLECTIONS.get(role)
+    if not coll_name:
+        # admin or unknown — make sure linked_profile_id stays None
+        await db.users.update_one({"id": user_id}, {"$set": {"linked_profile_id": None}})
+        return
+    coll = db[coll_name]
+
+    # 1) Clear old link if changed
+    if old_profile_id and old_profile_id != new_profile_id:
+        await coll.update_one(
+            {"id": old_profile_id},
+            {"$set": {"user_id": None, "updated_at": now_iso()}},
+        )
+
+    if not new_profile_id:
+        return
+
+    # 2) If another user already linked to this profile, unlink them
+    target = await coll.find_one({"id": new_profile_id})
+    if target and target.get("user_id") and target["user_id"] != user_id:
+        await db.users.update_one(
+            {"id": target["user_id"]},
+            {"$set": {"linked_profile_id": None, "updated_at": now_iso()}},
+        )
+
+    # 3) Clear any other profile in same collection that points to this user
+    await coll.update_many(
+        {"user_id": user_id, "id": {"$ne": new_profile_id}},
+        {"$set": {"user_id": None, "updated_at": now_iso()}},
+    )
+
+    # 4) Set the new link
+    await coll.update_one(
+        {"id": new_profile_id},
+        {"$set": {"user_id": user_id, "updated_at": now_iso()}},
+    )
+
 # ---------------------------------------------------------------------------
 # Pydantic Models
 # ---------------------------------------------------------------------------
@@ -218,6 +268,8 @@ async def dashboard_stats(user=Depends(get_current_user)):
         }
     if role == "pengawas":
         sup = await db.supervisors.find_one({"user_id": user["id"]}, {"_id": 0})
+        if not sup and user.get("linked_profile_id"):
+            sup = await db.supervisors.find_one({"id": user["linked_profile_id"]}, {"_id": 0})
         work_area = (sup or {}).get("work_area", "")
         school_query = {"status": "aktif"}
         if work_area:
@@ -232,6 +284,8 @@ async def dashboard_stats(user=Depends(get_current_user)):
         }
     if role == "kepala_sekolah":
         prin = await db.principals.find_one({"user_id": user["id"]}, {"_id": 0})
+        if not prin and user.get("linked_profile_id"):
+            prin = await db.principals.find_one({"id": user["linked_profile_id"]}, {"_id": 0})
         school_id = (prin or {}).get("school_id")
         guru_count = await db.teachers.count_documents({"school_id": school_id, "status": "aktif"}) if school_id else 0
         sekolah = await db.schools.find_one({"id": school_id}, {"_id": 0}) if school_id else None
@@ -241,6 +295,8 @@ async def dashboard_stats(user=Depends(get_current_user)):
         }
     # guru
     teacher = await db.teachers.find_one({"user_id": user["id"]}, {"_id": 0})
+    if not teacher and user.get("linked_profile_id"):
+        teacher = await db.teachers.find_one({"id": user["linked_profile_id"]}, {"_id": 0})
     school = await db.schools.find_one({"id": (teacher or {}).get("school_id")}, {"_id": 0}) if teacher else None
     return {
         "profil": teacher,
@@ -273,6 +329,7 @@ async def create_user(body: UserCreate, user=Depends(require_roles("admin"))):
         "updated_at": now_iso(),
     }
     await db.users.insert_one(doc)
+    await sync_user_profile_link(doc["id"], body.role, body.linked_profile_id, None)
     await audit(user["id"], "create", "users", doc["id"], None, {"email": email, "role": body.role})
     return clean(doc)
 
@@ -281,7 +338,7 @@ async def update_user(user_id: str, body: UserUpdate, user=Depends(require_roles
     existing = await db.users.find_one({"id": user_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan")
-    upd = {k: v for k, v in body.model_dump(exclude_none=True).items()}
+    upd = {k: v for k, v in body.model_dump(exclude_unset=True).items()}
     if "password" in upd:
         upd["password_hash"] = hash_password(upd.pop("password"))
     if "email" in upd:
@@ -290,6 +347,15 @@ async def update_user(user_id: str, body: UserUpdate, user=Depends(require_roles
             raise HTTPException(status_code=400, detail="Email sudah terdaftar")
     upd["updated_at"] = now_iso()
     await db.users.update_one({"id": user_id}, {"$set": upd})
+    # sync profile link if role or linked_profile_id changed
+    new_role = upd.get("role", existing["role"])
+    if "linked_profile_id" in upd or "role" in upd:
+        await sync_user_profile_link(
+            user_id,
+            new_role,
+            upd.get("linked_profile_id", existing.get("linked_profile_id")),
+            existing.get("linked_profile_id"),
+        )
     new_doc = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
     await audit(user["id"], "update", "users", user_id, {"email": existing["email"]}, upd)
     return new_doc
@@ -520,15 +586,22 @@ async def update_permission(perm_id: str, body: PermissionUpdate, user=Depends(r
 @api.get("/profile/me")
 async def my_profile(user=Depends(get_current_user)):
     role = user["role"]
+    lpid = user.get("linked_profile_id")
     if role == "guru":
         teacher = await db.teachers.find_one({"user_id": user["id"]}, {"_id": 0})
+        if not teacher and lpid:
+            teacher = await db.teachers.find_one({"id": lpid}, {"_id": 0})
         school = await db.schools.find_one({"id": (teacher or {}).get("school_id")}, {"_id": 0}) if teacher else None
         return {"user": user, "teacher": teacher, "school": school}
     if role == "pengawas":
         sup = await db.supervisors.find_one({"user_id": user["id"]}, {"_id": 0})
+        if not sup and lpid:
+            sup = await db.supervisors.find_one({"id": lpid}, {"_id": 0})
         return {"user": user, "supervisor": sup}
     if role == "kepala_sekolah":
         prin = await db.principals.find_one({"user_id": user["id"]}, {"_id": 0})
+        if not prin and lpid:
+            prin = await db.principals.find_one({"id": lpid}, {"_id": 0})
         school = await db.schools.find_one({"id": (prin or {}).get("school_id")}, {"_id": 0}) if prin else None
         return {"user": user, "principal": prin, "school": school}
     return {"user": user}
@@ -688,6 +761,26 @@ async def on_startup():
     await db.role_permissions.create_index([("role", 1), ("menu_name", 1)], unique=True)
     await seed_permissions()
     await seed_data()
+    await heal_profile_links()
+
+
+async def heal_profile_links():
+    """Backfill profile.user_id for users that already have linked_profile_id set.
+
+    Idempotent: safe to run on every startup.
+    """
+    async for u in db.users.find({"linked_profile_id": {"$ne": None}}, {"_id": 0}):
+        coll_name = PROFILE_COLLECTIONS.get(u["role"])
+        if not coll_name:
+            continue
+        coll = db[coll_name]
+        target = await coll.find_one({"id": u["linked_profile_id"]})
+        if target and target.get("user_id") != u["id"]:
+            await coll.update_one(
+                {"id": u["linked_profile_id"]},
+                {"$set": {"user_id": u["id"], "updated_at": now_iso()}},
+            )
+            logger.info(f"Healed link: user {u['email']} -> {coll_name}/{u['linked_profile_id']}")
 
 @app.on_event("shutdown")
 async def on_shutdown():
