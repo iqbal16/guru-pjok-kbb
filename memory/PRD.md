@@ -26,6 +26,22 @@ Aplikasi web full-stack untuk Penilaian Kinerja Guru Penjas/PJOK SD di wilayah K
 
 ## What's Been Implemented (28 Mei 2026)
 
+### Tahap 2 — Periode Penilaian & Komponen Observasi PJOK (28 Mei 2026)
+- **Schema baru**: `academic_years`, `semesters`, `assessment_periods`, `observation_categories`, `observation_aspects` (UUID + ISO datetime).
+- **Endpoints**: full CRUD untuk 5 koleksi + `POST /api/assessment-periods/{id}/activate` + `GET /api/assessment-periods/active`. RBAC: admin full CRUD; pengawas/kepsek/guru hanya melihat data aktif. Aspek non-aktif disembunyikan dari non-admin.
+- **Constraint database**: unique pada `academic_years.year_name`, `semesters.semester_name`, `semesters.semester_order`, `(assessment_periods.academic_year_id, semester_id)`, `observation_categories.category_name`. Hanya 1 periode bisa `is_active=true` (auto-deactivate yang lain saat aktivasi/create/update).
+- **Seed Phase 2**: 1 AY 2025/2026, 2 semester (Ganjil/Genap), 1 active period 'Semester Genap 2025/2026', 3 kategori, 18 aspek.
+- **Frontend baru** (5 halaman): AcademicYears, Semesters, AssessmentPeriods (admin CRUD + read-only card untuk non-admin), ObservationCategories (admin CRUD + read-only untuk non-admin, dengan referensi skor 1-4), ObservationAspects.
+- **Sidebar** diorganisir 3 section: "Master Data", "Periode & Instrumen", "Sistem".
+- **Dashboard** badge `active-period-badge` ambil dari `/api/assessment-periods/active` (fallback "Belum ada periode aktif").
+- **Audit log**: otomatis untuk create/update/delete + activate pada 5 koleksi baru.
+
+### Testing
+- Backend: **56/56 pytest pass** (Phase 1: 34 + Phase 2: 22, termasuk RBAC, uniqueness, activate auto-deactivate, nonaktif filter).
+- Frontend: Playwright e2e — sidebar role-based dengan 12 menu admin / 4 menu guru, semua halaman baru dapat dibuka & berfungsi, read-only views non-admin sesuai spec.
+
+### Tahap 1 — Fondasi (sebelumnya)
+
 ### Backend
 - Schema: `users`, `schools`, `teachers`, `supervisors`, `principals`, `role_permissions`, `audit_logs` (UUID-based IDs, ISO datetime strings).
 - Endpoints:
