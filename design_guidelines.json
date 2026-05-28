@@ -1,0 +1,111 @@
+{
+  "project_context": {
+    "name": "Sistem Penilaian Kinerja Guru PJOK SD Kabupaten Bandung Barat",
+    "domain": "Government / Education / Sports Admin Panel",
+    "theme_mode": "light",
+    "archetype": "4 (Swiss & High-Contrast) + Regional Sports Accents",
+    "emotional_tone": "Professional, Authoritative, Active, Accessible",
+    "language": "id-ID (Bahasa Indonesia full untuk semua UI, menu, tombol, status, dan pesan validasi)"
+  },
+  "design_system": {
+    "typography": {
+      "rules": "Gunakan Outfit untuk heading dan Plus Jakarta Sans untuk body. Hindari Inter atau Roboto.",
+      "font_families": {
+        "heading": "Outfit, sans-serif",
+        "body": "Plus Jakarta Sans, sans-serif"
+      },
+      "scales": {
+        "h1": "text-4xl sm:text-5xl font-bold tracking-tight text-slate-900",
+        "h2": "text-2xl sm:text-3xl font-semibold tracking-tight text-slate-900",
+        "h3": "text-xl sm:text-2xl font-semibold text-slate-800",
+        "h4": "text-lg sm:text-xl font-medium text-slate-800",
+        "body": "text-base leading-relaxed text-slate-600",
+        "small": "text-sm text-slate-500",
+        "overline": "text-xs font-bold uppercase tracking-[0.2em] text-emerald-600"
+      }
+    },
+    "color_palette": {
+      "primary": {
+        "base": "#047857",
+        "hover": "#059669",
+        "light": "#D1FAE5",
+        "description": "Emerald Green - Merepresentasikan alam dan pemerintahan Kabupaten Bandung Barat. Gunakan untuk primary buttons, sidebar background, dan active states."
+      },
+      "secondary": {
+        "base": "#F97316",
+        "hover": "#EA580C",
+        "light": "#FFEDD5",
+        "description": "Orange - Merepresentasikan energi, olahraga (PJOK), dan aksi. Gunakan untuk badges, highlights, dan secondary CTAs."
+      },
+      "neutral": {
+        "background": "#F8FAFC",
+        "surface": "#FFFFFF",
+        "border": "#E2E8F0",
+        "text_main": "#0F172A",
+        "text_muted": "#64748B"
+      },
+      "status": {
+        "success": "#10B981",
+        "warning": "#F59E0B",
+        "danger": "#EF4444",
+        "info": "#3B82F6"
+      }
+    },
+    "layout_and_spacing": {
+      "strategy": "Control Room Grid",
+      "general_rules": "Spacing yang lega (p-6 atau p-8 pada cards). Border radius maksimal 8px (rounded-lg) untuk kesan tajam dan profesional.",
+      "dashboard_grid": "grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6",
+      "sidebar": "Fixed width 260px, dark mode (bg-emerald-950 text-white) untuk kontras tinggi dan kesan otoritas.",
+      "content_area": "bg-slate-50 min-h-screen pt-[72px] (jika ada topbar fixed) dengan padding p-6 atau p-8."
+    },
+    "components": {
+      "buttons": {
+        "primary": "bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg px-4 py-2 transition-colors",
+        "secondary": "bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg px-4 py-2",
+        "destructive": "bg-red-600 hover:bg-red-700 text-white rounded-lg px-4 py-2"
+      },
+      "cards": {
+        "style": "bg-white rounded-lg border border-slate-200 shadow-sm p-6 hover:shadow-md transition-shadow",
+        "stat_card": "flex flex-col gap-2. Gunakan icon dengan background emerald-100 dan text emerald-700."
+      },
+      "tables": {
+        "style": "Wajib menggunakan Shadcn Table. Header dengan bg-slate-50 text-slate-600 font-medium. Row hover dengan bg-slate-50/50. 1px border border-slate-200."
+      },
+      "forms": {
+        "style": "Shadcn Form/Input. Focus ring wajib menggunakan ring-emerald-500. Label form menggunakan teks Bahasa Indonesia formal."
+      }
+    },
+    "icons": {
+      "library": "lucide-react",
+      "usage": "Gunakan stroke-width 2 untuk konsistensi. Ukuran standar 20px (w-5 h-5)."
+    }
+  },
+  "media_and_assets": {
+    "images": [
+      {
+        "category": "login_background",
+        "url": "https://static.prod-images.emergentagent.com/jobs/48dbf92f-611d-4c06-bc9d-46b42ac8c8a3/images/63322c1b7ed596b392d9cb4284cd7e53ec4f698a643f6dd84db2c67b0a0b80f0.png",
+        "description": "Background topografi hijau dan oranye untuk halaman login (split screen sebelah kanan atau kiri)."
+      },
+      {
+        "category": "dashboard_hero_or_placeholder",
+        "url": "https://images.pexels.com/photos/33334606/pexels-photo-33334606.jpeg",
+        "description": "Pemandangan kebun teh, representasi visual wilayah Kabupaten Bandung Barat, bisa digunakan untuk banner ucapan selamat datang di Dashboard Admin."
+      },
+      {
+        "category": "pjok_activity_placeholder",
+        "url": "https://images.unsplash.com/photo-1663246544917-9fa8f65b8359",
+        "description": "Anak-anak sekolah dasar berolahraga. Representasi Guru PJOK, bisa digunakan di banner Dashboard Guru."
+      }
+    ]
+  },
+  "implementation_instructions_for_main_agent": {
+    "language_enforcement": "Seluruh teks wajib Bahasa Indonesia. 'Dashboard', 'Data Sekolah', 'Data Guru', 'Manajemen Pengguna', 'Pengaturan Hak Akses', 'Cari...', 'Tambah Data', 'Simpan', 'Batal', 'Hapus', 'Ubah', 'Keluar'.",
+    "testing": "Tambahkan atribut data-testid pada SEMUA elemen interaktif (button, input, tab, link). Gunakan format kebab-case, contoh: data-testid=\"login-submit-button\", data-testid=\"sidebar-menu-guru\".",
+    "navigation_sidebar": "Sidebar harus role-based. Admin melihat semua menu. Pengawas, Kepala Sekolah, dan Guru hanya melihat menu yang relevan dengan mereka. Menu aktif di-highlight dengan bg-emerald-800 text-white border-r-4 border-orange-500.",
+    "topbar": "Wajib ada topbar berisi Nama User, Role (sebagai badge), dan Avatar/Profile dropdown yang memiliki opsi 'Keluar'.",
+    "empty_states": "Untuk tabel yang kosong, jangan tampilkan tabel kosong saja. Tampilkan ilustrasi/icon dengan pesan 'Data belum tersedia' dan tombol 'Tambah Data' jika user memiliki akses create.",
+    "toast_notifications": "Gunakan Sonner untuk toast. Pesan harus dalam Bahasa Indonesia (contoh: 'Berhasil menyimpan data', 'Gagal menghapus data').",
+    "dialogs": "Semua aksi hapus (delete) wajib memunculkan konfirmasi dialog box (Shadcn Alert Dialog) sebelum eksekusi."
+  }
+}
