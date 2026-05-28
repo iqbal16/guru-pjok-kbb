@@ -11,6 +11,11 @@ import {
   LogOut,
   Trophy,
   User,
+  CalendarRange,
+  CalendarDays,
+  CalendarCheck2,
+  Layers,
+  ListChecks,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -26,11 +31,19 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 const MENU = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, roles: ["admin", "pengawas", "kepala_sekolah", "guru"], testid: "menu-dashboard" },
   { to: "/profil", label: "Profil Saya", icon: User, roles: ["guru"], testid: "menu-profile" },
+  { section: "Master Data", roles: ["admin", "pengawas", "kepala_sekolah"] },
   { to: "/users", label: "Manajemen Pengguna", icon: Users, roles: ["admin"], testid: "menu-users" },
   { to: "/sekolah", label: "Data Sekolah", icon: School, roles: ["admin", "pengawas", "kepala_sekolah"], testid: "menu-sekolah" },
   { to: "/guru", label: "Data Guru", icon: GraduationCap, roles: ["admin", "pengawas", "kepala_sekolah"], testid: "menu-guru" },
   { to: "/pengawas", label: "Data Pengawas", icon: UserCog, roles: ["admin"], testid: "menu-pengawas" },
   { to: "/kepala-sekolah", label: "Data Kepala Sekolah", icon: UserCheck, roles: ["admin"], testid: "menu-kepsek" },
+  { section: "Periode & Instrumen", roles: ["admin", "pengawas", "kepala_sekolah", "guru"] },
+  { to: "/tahun-ajaran", label: "Tahun Ajaran", icon: CalendarRange, roles: ["admin"], testid: "menu-tahun-ajaran" },
+  { to: "/semester", label: "Semester", icon: CalendarDays, roles: ["admin"], testid: "menu-semester" },
+  { to: "/periode-penilaian", label: "Periode Penilaian", icon: CalendarCheck2, roles: ["admin", "pengawas", "kepala_sekolah", "guru"], testid: "menu-periode" },
+  { to: "/komponen-observasi", label: "Komponen Observasi", icon: Layers, roles: ["admin", "pengawas", "kepala_sekolah", "guru"], testid: "menu-komponen" },
+  { to: "/aspek-penilaian", label: "Aspek Penilaian", icon: ListChecks, roles: ["admin"], testid: "menu-aspek" },
+  { section: "Sistem", roles: ["admin"] },
   { to: "/permissions", label: "Pengaturan Hak Akses", icon: ShieldCheck, roles: ["admin"], testid: "menu-permissions" },
 ];
 
@@ -62,24 +75,33 @@ export default function DashboardLayout() {
           </div>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {menus.map((m) => (
-            <NavLink
-              key={m.to}
-              to={m.to}
-              end={m.to === "/"}
-              data-testid={m.testid}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                  isActive
-                    ? "bg-emerald-800 text-white border-r-4 border-orange-500 font-semibold"
-                    : "text-emerald-100/80 hover:bg-emerald-900/60 hover:text-white"
-                }`
-              }
-            >
-              <m.icon className="w-5 h-5" strokeWidth={2} />
-              <span>{m.label}</span>
-            </NavLink>
-          ))}
+          {menus.map((m, idx) => {
+            if (m.section) {
+              return (
+                <div key={`sec-${idx}`} className="px-3 pt-4 pb-1 text-[10px] uppercase tracking-[0.2em] font-bold text-emerald-300/60">
+                  {m.section}
+                </div>
+              );
+            }
+            return (
+              <NavLink
+                key={m.to}
+                to={m.to}
+                end={m.to === "/"}
+                data-testid={m.testid}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                    isActive
+                      ? "bg-emerald-800 text-white border-r-4 border-orange-500 font-semibold"
+                      : "text-emerald-100/80 hover:bg-emerald-900/60 hover:text-white"
+                  }`
+                }
+              >
+                <m.icon className="w-5 h-5" strokeWidth={2} />
+                <span>{m.label}</span>
+              </NavLink>
+            );
+          })}
         </nav>
         <div className="px-4 py-3 border-t border-emerald-900/60 text-[11px] text-emerald-300/70">
           Kab. Bandung Barat • Jenjang SD

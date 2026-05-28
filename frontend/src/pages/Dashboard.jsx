@@ -45,12 +45,15 @@ export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [stats, setStats] = useState(null);
+  const [active, setActive] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api
-      .get("/dashboard/stats")
-      .then((r) => setStats(r.data))
+    Promise.all([
+      api.get("/dashboard/stats"),
+      api.get("/assessment-periods/active"),
+    ])
+      .then(([s, p]) => { setStats(s.data); setActive(p.data?.active || null); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -72,8 +75,8 @@ export default function Dashboard() {
             Ringkasan sistem penilaian kinerja Guru PJOK SD Kabupaten Bandung Barat.
           </p>
         </div>
-        <Badge className="bg-orange-100 text-orange-700 border-0 px-3 py-1.5">
-          Semester Aktif: Genap 2025/2026
+        <Badge className="bg-orange-100 text-orange-700 border-0 px-3 py-1.5" data-testid="active-period-badge">
+          {active ? `Periode Aktif: ${active.period_name}` : "Belum ada periode aktif"}
         </Badge>
       </div>
 

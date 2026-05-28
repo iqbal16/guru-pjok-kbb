@@ -13,6 +13,11 @@ import Supervisors from "@/pages/Supervisors";
 import Principals from "@/pages/Principals";
 import Permissions from "@/pages/Permissions";
 import Profile from "@/pages/Profile";
+import AcademicYears from "@/pages/AcademicYears";
+import Semesters from "@/pages/Semesters";
+import AssessmentPeriods from "@/pages/AssessmentPeriods";
+import ObservationCategories from "@/pages/ObservationCategories";
+import ObservationAspects from "@/pages/ObservationAspects";
 
 function App() {
   return (
@@ -30,6 +35,11 @@ function App() {
               <Route path="/pengawas" element={<ProtectedRoute roles={["admin"]}><Supervisors /></ProtectedRoute>} />
               <Route path="/kepala-sekolah" element={<ProtectedRoute roles={["admin"]}><Principals /></ProtectedRoute>} />
               <Route path="/permissions" element={<ProtectedRoute roles={["admin"]}><Permissions /></ProtectedRoute>} />
+              <Route path="/tahun-ajaran" element={<ProtectedRoute roles={["admin"]}><AcademicYears /></ProtectedRoute>} />
+              <Route path="/semester" element={<ProtectedRoute roles={["admin"]}><Semesters /></ProtectedRoute>} />
+              <Route path="/periode-penilaian" element={<ProtectedRoute roles={["admin", "pengawas", "kepala_sekolah", "guru"]}><AssessmentPeriods /></ProtectedRoute>} />
+              <Route path="/komponen-observasi" element={<ProtectedRoute roles={["admin", "pengawas", "kepala_sekolah", "guru"]}><ObservationCategories /></ProtectedRoute>} />
+              <Route path="/aspek-penilaian" element={<ProtectedRoute roles={["admin"]}><ObservationAspects /></ProtectedRoute>} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

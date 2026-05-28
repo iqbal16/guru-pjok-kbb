@@ -606,6 +606,296 @@ async def my_profile(user=Depends(get_current_user)):
         return {"user": user, "principal": prin, "school": school}
     return {"user": user}
 
+# =============================================================================
+# PHASE 2 — Periode Penilaian & Komponen Observasi PJOK
+# =============================================================================
+
+class AcademicYearIn(BaseModel):
+    year_name: str
+    start_date: str = ""
+    end_date: str = ""
+    status: str = "aktif"
+
+class SemesterIn(BaseModel):
+    semester_name: str
+    semester_order: int
+    status: str = "aktif"
+
+class AssessmentPeriodIn(BaseModel):
+    academic_year_id: str
+    semester_id: str
+    period_name: str
+    start_date: str = ""
+    end_date: str = ""
+    status: str = "aktif"
+    is_active: bool = False
+
+class ObservationCategoryIn(BaseModel):
+    category_name: str
+    description: str = ""
+    display_order: int = 0
+    status: str = "aktif"
+
+class ObservationAspectIn(BaseModel):
+    category_id: str
+    aspect_name: str
+    aspect_description: str = ""
+    display_order: int = 0
+    status: str = "aktif"
+
+def _now_doc(extra: dict) -> dict:
+    return {**extra, "id": str(uuid.uuid4()), "created_at": now_iso(), "updated_at": now_iso()}
+
+# ---------------- ACADEMIC YEARS ----------------
+@api.get("/academic-years")
+async def list_academic_years(user=Depends(get_current_user)):
+    q = {} if user["role"] == "admin" else {"status": "aktif"}
+    return await db.academic_years.find(q, {"_id": 0}).sort("year_name", -1).to_list(1000)
+
+@api.post("/academic-years")
+async def create_academic_year(body: AcademicYearIn, user=Depends(require_roles("admin"))):
+    if await db.academic_years.find_one({"year_name": body.year_name}):
+        raise HTTPException(status_code=400, detail="Tahun ajaran sudah terdaftar")
+    doc = _now_doc(body.model_dump())
+    await db.academic_years.insert_one(doc)
+    await audit(user["id"], "create", "academic_years", doc["id"], None, doc)
+    doc.pop("_id", None)
+    return doc
+
+@api.put("/academic-years/{yid}")
+async def update_academic_year(yid: str, body: AcademicYearIn, user=Depends(require_roles("admin"))):
+    existing = await db.academic_years.find_one({"id": yid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Tahun ajaran tidak ditemukan")
+    if body.year_name != existing["year_name"] and await db.academic_years.find_one({"year_name": body.year_name}):
+        raise HTTPException(status_code=400, detail="Tahun ajaran sudah terdaftar")
+    upd = body.model_dump()
+    upd["updated_at"] = now_iso()
+    await db.academic_years.update_one({"id": yid}, {"$set": upd})
+    await audit(user["id"], "update", "academic_years", yid, clean(existing), upd)
+    return await db.academic_years.find_one({"id": yid}, {"_id": 0})
+
+@api.delete("/academic-years/{yid}")
+async def delete_academic_year(yid: str, user=Depends(require_roles("admin"))):
+    existing = await db.academic_years.find_one({"id": yid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Tahun ajaran tidak ditemukan")
+    if await db.assessment_periods.find_one({"academic_year_id": yid}):
+        raise HTTPException(status_code=400, detail="Tahun ajaran masih dipakai oleh periode penilaian")
+    await db.academic_years.delete_one({"id": yid})
+    await audit(user["id"], "delete", "academic_years", yid, clean(existing), None)
+    return {"ok": True}
+
+# ---------------- SEMESTERS ----------------
+@api.get("/semesters")
+async def list_semesters(user=Depends(get_current_user)):
+    q = {} if user["role"] == "admin" else {"status": "aktif"}
+    return await db.semesters.find(q, {"_id": 0}).sort("semester_order", 1).to_list(100)
+
+@api.post("/semesters")
+async def create_semester(body: SemesterIn, user=Depends(require_roles("admin"))):
+    if await db.semesters.find_one({"semester_name": body.semester_name}):
+        raise HTTPException(status_code=400, detail="Nama semester sudah terdaftar")
+    if await db.semesters.find_one({"semester_order": body.semester_order}):
+        raise HTTPException(status_code=400, detail="Urutan semester sudah dipakai")
+    doc = _now_doc(body.model_dump())
+    await db.semesters.insert_one(doc)
+    await audit(user["id"], "create", "semesters", doc["id"], None, doc)
+    doc.pop("_id", None)
+    return doc
+
+@api.put("/semesters/{sid}")
+async def update_semester(sid: str, body: SemesterIn, user=Depends(require_roles("admin"))):
+    existing = await db.semesters.find_one({"id": sid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Semester tidak ditemukan")
+    if body.semester_name != existing["semester_name"] and await db.semesters.find_one({"semester_name": body.semester_name}):
+        raise HTTPException(status_code=400, detail="Nama semester sudah terdaftar")
+    if body.semester_order != existing["semester_order"] and await db.semesters.find_one({"semester_order": body.semester_order}):
+        raise HTTPException(status_code=400, detail="Urutan semester sudah dipakai")
+    upd = body.model_dump()
+    upd["updated_at"] = now_iso()
+    await db.semesters.update_one({"id": sid}, {"$set": upd})
+    await audit(user["id"], "update", "semesters", sid, clean(existing), upd)
+    return await db.semesters.find_one({"id": sid}, {"_id": 0})
+
+@api.delete("/semesters/{sid}")
+async def delete_semester(sid: str, user=Depends(require_roles("admin"))):
+    existing = await db.semesters.find_one({"id": sid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Semester tidak ditemukan")
+    if await db.assessment_periods.find_one({"semester_id": sid}):
+        raise HTTPException(status_code=400, detail="Semester masih dipakai oleh periode penilaian")
+    await db.semesters.delete_one({"id": sid})
+    await audit(user["id"], "delete", "semesters", sid, clean(existing), None)
+    return {"ok": True}
+
+# ---------------- ASSESSMENT PERIODS ----------------
+@api.get("/assessment-periods")
+async def list_periods(user=Depends(get_current_user)):
+    q = {} if user["role"] == "admin" else {"is_active": True}
+    items = await db.assessment_periods.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+    years = {y["id"]: y async for y in db.academic_years.find({}, {"_id": 0})}
+    sems = {s["id"]: s async for s in db.semesters.find({}, {"_id": 0})}
+    for p in items:
+        p["academic_year_name"] = (years.get(p.get("academic_year_id")) or {}).get("year_name")
+        p["semester_name"] = (sems.get(p.get("semester_id")) or {}).get("semester_name")
+    return items
+
+@api.get("/assessment-periods/active")
+async def active_period(user=Depends(get_current_user)):
+    p = await db.assessment_periods.find_one({"is_active": True}, {"_id": 0})
+    if not p:
+        return {"active": None}
+    year = await db.academic_years.find_one({"id": p.get("academic_year_id")}, {"_id": 0})
+    sem = await db.semesters.find_one({"id": p.get("semester_id")}, {"_id": 0})
+    return {
+        "active": {
+            **p,
+            "academic_year_name": (year or {}).get("year_name"),
+            "semester_name": (sem or {}).get("semester_name"),
+        }
+    }
+
+@api.post("/assessment-periods")
+async def create_period(body: AssessmentPeriodIn, user=Depends(require_roles("admin"))):
+    if not await db.academic_years.find_one({"id": body.academic_year_id}):
+        raise HTTPException(status_code=400, detail="Tahun ajaran tidak ditemukan")
+    if not await db.semesters.find_one({"id": body.semester_id}):
+        raise HTTPException(status_code=400, detail="Semester tidak ditemukan")
+    if await db.assessment_periods.find_one({"academic_year_id": body.academic_year_id, "semester_id": body.semester_id}):
+        raise HTTPException(status_code=400, detail="Periode untuk tahun ajaran dan semester ini sudah ada")
+    doc = _now_doc(body.model_dump())
+    if doc.get("is_active"):
+        await db.assessment_periods.update_many({}, {"$set": {"is_active": False}})
+    await db.assessment_periods.insert_one(doc)
+    await audit(user["id"], "create", "assessment_periods", doc["id"], None, doc)
+    doc.pop("_id", None)
+    return doc
+
+@api.put("/assessment-periods/{pid}")
+async def update_period(pid: str, body: AssessmentPeriodIn, user=Depends(require_roles("admin"))):
+    existing = await db.assessment_periods.find_one({"id": pid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Periode tidak ditemukan")
+    dup = await db.assessment_periods.find_one({
+        "academic_year_id": body.academic_year_id,
+        "semester_id": body.semester_id,
+        "id": {"$ne": pid},
+    })
+    if dup:
+        raise HTTPException(status_code=400, detail="Periode untuk tahun ajaran dan semester ini sudah ada")
+    upd = body.model_dump()
+    upd["updated_at"] = now_iso()
+    if upd.get("is_active"):
+        await db.assessment_periods.update_many({"id": {"$ne": pid}}, {"$set": {"is_active": False}})
+    await db.assessment_periods.update_one({"id": pid}, {"$set": upd})
+    await audit(user["id"], "update", "assessment_periods", pid, clean(existing), upd)
+    return await db.assessment_periods.find_one({"id": pid}, {"_id": 0})
+
+@api.post("/assessment-periods/{pid}/activate")
+async def activate_period(pid: str, user=Depends(require_roles("admin"))):
+    existing = await db.assessment_periods.find_one({"id": pid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Periode tidak ditemukan")
+    await db.assessment_periods.update_many({}, {"$set": {"is_active": False, "updated_at": now_iso()}})
+    await db.assessment_periods.update_one({"id": pid}, {"$set": {"is_active": True, "updated_at": now_iso()}})
+    await audit(user["id"], "activate", "assessment_periods", pid, {"is_active": existing.get("is_active")}, {"is_active": True})
+    return await db.assessment_periods.find_one({"id": pid}, {"_id": 0})
+
+@api.delete("/assessment-periods/{pid}")
+async def delete_period(pid: str, user=Depends(require_roles("admin"))):
+    existing = await db.assessment_periods.find_one({"id": pid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Periode tidak ditemukan")
+    await db.assessment_periods.delete_one({"id": pid})
+    await audit(user["id"], "delete", "assessment_periods", pid, clean(existing), None)
+    return {"ok": True}
+
+# ---------------- OBSERVATION CATEGORIES ----------------
+@api.get("/observation-categories")
+async def list_categories(user=Depends(get_current_user)):
+    q = {} if user["role"] == "admin" else {"status": "aktif"}
+    return await db.observation_categories.find(q, {"_id": 0}).sort("display_order", 1).to_list(200)
+
+@api.post("/observation-categories")
+async def create_category(body: ObservationCategoryIn, user=Depends(require_roles("admin"))):
+    if await db.observation_categories.find_one({"category_name": body.category_name}):
+        raise HTTPException(status_code=400, detail="Kategori observasi sudah terdaftar")
+    doc = _now_doc(body.model_dump())
+    await db.observation_categories.insert_one(doc)
+    await audit(user["id"], "create", "observation_categories", doc["id"], None, doc)
+    doc.pop("_id", None)
+    return doc
+
+@api.put("/observation-categories/{cid}")
+async def update_category(cid: str, body: ObservationCategoryIn, user=Depends(require_roles("admin"))):
+    existing = await db.observation_categories.find_one({"id": cid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Kategori tidak ditemukan")
+    if body.category_name != existing["category_name"] and await db.observation_categories.find_one({"category_name": body.category_name}):
+        raise HTTPException(status_code=400, detail="Kategori observasi sudah terdaftar")
+    upd = body.model_dump()
+    upd["updated_at"] = now_iso()
+    await db.observation_categories.update_one({"id": cid}, {"$set": upd})
+    await audit(user["id"], "update", "observation_categories", cid, clean(existing), upd)
+    return await db.observation_categories.find_one({"id": cid}, {"_id": 0})
+
+@api.delete("/observation-categories/{cid}")
+async def delete_category(cid: str, user=Depends(require_roles("admin"))):
+    existing = await db.observation_categories.find_one({"id": cid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Kategori tidak ditemukan")
+    if await db.observation_aspects.find_one({"category_id": cid}):
+        raise HTTPException(status_code=400, detail="Kategori masih memiliki aspek penilaian")
+    await db.observation_categories.delete_one({"id": cid})
+    await audit(user["id"], "delete", "observation_categories", cid, clean(existing), None)
+    return {"ok": True}
+
+# ---------------- OBSERVATION ASPECTS ----------------
+@api.get("/observation-aspects")
+async def list_aspects(user=Depends(get_current_user)):
+    q = {} if user["role"] == "admin" else {"status": "aktif"}
+    return await db.observation_aspects.find(q, {"_id": 0}).sort([("category_id", 1), ("display_order", 1)]).to_list(2000)
+
+@api.post("/observation-aspects")
+async def create_aspect(body: ObservationAspectIn, user=Depends(require_roles("admin"))):
+    if not body.aspect_name.strip():
+        raise HTTPException(status_code=400, detail="Nama aspek tidak boleh kosong")
+    if not await db.observation_categories.find_one({"id": body.category_id}):
+        raise HTTPException(status_code=400, detail="Kategori observasi tidak ditemukan")
+    doc = _now_doc(body.model_dump())
+    await db.observation_aspects.insert_one(doc)
+    await audit(user["id"], "create", "observation_aspects", doc["id"], None, doc)
+    doc.pop("_id", None)
+    return doc
+
+@api.put("/observation-aspects/{aid}")
+async def update_aspect(aid: str, body: ObservationAspectIn, user=Depends(require_roles("admin"))):
+    existing = await db.observation_aspects.find_one({"id": aid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Aspek tidak ditemukan")
+    if not body.aspect_name.strip():
+        raise HTTPException(status_code=400, detail="Nama aspek tidak boleh kosong")
+    if not await db.observation_categories.find_one({"id": body.category_id}):
+        raise HTTPException(status_code=400, detail="Kategori observasi tidak ditemukan")
+    upd = body.model_dump()
+    upd["updated_at"] = now_iso()
+    await db.observation_aspects.update_one({"id": aid}, {"$set": upd})
+    await audit(user["id"], "update", "observation_aspects", aid, clean(existing), upd)
+    return await db.observation_aspects.find_one({"id": aid}, {"_id": 0})
+
+@api.delete("/observation-aspects/{aid}")
+async def delete_aspect(aid: str, user=Depends(require_roles("admin"))):
+    existing = await db.observation_aspects.find_one({"id": aid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Aspek tidak ditemukan")
+    await db.observation_aspects.delete_one({"id": aid})
+    await audit(user["id"], "delete", "observation_aspects", aid, clean(existing), None)
+    return {"ok": True}
+
+
+
 # ---------------------------------------------------------------------------
 # Mount router + middleware
 # ---------------------------------------------------------------------------
@@ -759,9 +1049,117 @@ async def on_startup():
     await db.users.create_index("email", unique=True)
     await db.schools.create_index("npsn", unique=True)
     await db.role_permissions.create_index([("role", 1), ("menu_name", 1)], unique=True)
+    await db.academic_years.create_index("year_name", unique=True)
+    await db.semesters.create_index("semester_name", unique=True)
+    await db.semesters.create_index("semester_order", unique=True)
+    await db.assessment_periods.create_index([("academic_year_id", 1), ("semester_id", 1)], unique=True)
+    await db.observation_categories.create_index("category_name", unique=True)
     await seed_permissions()
     await seed_data()
+    await seed_phase2()
     await heal_profile_links()
+
+
+async def seed_phase2():
+    """Seed academic year, semesters, active period, observation categories & aspects."""
+    # Academic year
+    ay = await db.academic_years.find_one({"year_name": "2025/2026"})
+    if not ay:
+        ay = _now_doc({"year_name": "2025/2026", "start_date": "2025-07-15", "end_date": "2026-06-30", "status": "aktif"})
+        await db.academic_years.insert_one(ay)
+        logger.info("Seeded academic year 2025/2026")
+    ay_id = ay["id"]
+
+    # Semesters
+    semesters = [
+        {"semester_name": "Ganjil", "semester_order": 1, "status": "aktif"},
+        {"semester_name": "Genap", "semester_order": 2, "status": "aktif"},
+    ]
+    sem_ids = {}
+    for s in semesters:
+        existing = await db.semesters.find_one({"semester_name": s["semester_name"]})
+        if not existing:
+            doc = _now_doc(s)
+            await db.semesters.insert_one(doc)
+            sem_ids[s["semester_name"]] = doc["id"]
+        else:
+            sem_ids[s["semester_name"]] = existing["id"]
+
+    # Assessment period: Semester Genap 2025/2026 (active)
+    genap_id = sem_ids["Genap"]
+    period = await db.assessment_periods.find_one({"academic_year_id": ay_id, "semester_id": genap_id})
+    if not period:
+        await db.assessment_periods.update_many({}, {"$set": {"is_active": False}})
+        doc = _now_doc({
+            "academic_year_id": ay_id,
+            "semester_id": genap_id,
+            "period_name": "Semester Genap 2025/2026",
+            "start_date": "2026-01-06",
+            "end_date": "2026-06-30",
+            "status": "aktif",
+            "is_active": True,
+        })
+        await db.assessment_periods.insert_one(doc)
+        logger.info("Seeded active period Semester Genap 2025/2026")
+
+    # Observation categories
+    cat_defaults = [
+        ("Persiapan", "Kegiatan perencanaan & persiapan sebelum pembelajaran PJOK.", 1),
+        ("Pelaksanaan", "Aktivitas guru selama pembelajaran PJOK berlangsung.", 2),
+        ("Penilaian", "Asesmen, umpan balik, refleksi & tindak lanjut.", 3),
+    ]
+    cat_ids = {}
+    for name, desc, order in cat_defaults:
+        existing = await db.observation_categories.find_one({"category_name": name})
+        if not existing:
+            doc = _now_doc({"category_name": name, "description": desc, "display_order": order, "status": "aktif"})
+            await db.observation_categories.insert_one(doc)
+            cat_ids[name] = doc["id"]
+        else:
+            cat_ids[name] = existing["id"]
+
+    aspects_seed = {
+        "Persiapan": [
+            "Guru menyusun perangkat pembelajaran PJOK sesuai kurikulum.",
+            "Guru menyiapkan tujuan pembelajaran yang sesuai dengan kompetensi.",
+            "Guru menyiapkan media, alat, dan sarana olahraga sebelum pembelajaran.",
+            "Guru menyesuaikan kegiatan dengan kondisi fisik dan karakteristik siswa SD.",
+            "Guru menyiapkan instrumen penilaian untuk pembelajaran PJOK.",
+        ],
+        "Pelaksanaan": [
+            "Guru membuka pembelajaran dengan apersepsi dan pemanasan.",
+            "Guru menjelaskan tujuan, aturan, dan prosedur kegiatan dengan jelas.",
+            "Guru memberikan contoh gerakan atau aktivitas dengan benar.",
+            "Guru mengelola kelas atau lapangan dengan aman dan tertib.",
+            "Guru melibatkan siswa secara aktif dalam kegiatan pembelajaran.",
+            "Guru memberikan koreksi dan arahan saat siswa melakukan aktivitas.",
+            "Guru memperhatikan keselamatan siswa selama pembelajaran PJOK.",
+            "Guru menggunakan media atau alat olahraga secara efektif.",
+        ],
+        "Penilaian": [
+            "Guru melakukan penilaian keterampilan gerak siswa.",
+            "Guru melakukan penilaian sikap seperti disiplin, kerja sama, dan sportivitas.",
+            "Guru memberikan umpan balik kepada siswa.",
+            "Guru melakukan refleksi pembelajaran.",
+            "Guru menyusun tindak lanjut berdasarkan hasil pembelajaran.",
+        ],
+    }
+    for cat_name, items in aspects_seed.items():
+        cid = cat_ids.get(cat_name)
+        if not cid:
+            continue
+        for idx, name in enumerate(items, start=1):
+            if await db.observation_aspects.find_one({"category_id": cid, "aspect_name": name}):
+                continue
+            doc = _now_doc({
+                "category_id": cid,
+                "aspect_name": name,
+                "aspect_description": "",
+                "display_order": idx,
+                "status": "aktif",
+            })
+            await db.observation_aspects.insert_one(doc)
+    logger.info("Seeded observation categories & aspects.")
 
 
 async def heal_profile_links():
