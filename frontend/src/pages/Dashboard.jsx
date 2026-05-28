@@ -16,6 +16,10 @@ import {
   Mail,
   MapPin,
   Clock,
+  ClipboardList,
+  CheckCircle2,
+  CircleDot,
+  ClipboardCheck,
 } from "lucide-react";
 
 function StatCard({ title, value, icon: Icon, tone = "emerald", testid }) {
@@ -90,6 +94,17 @@ export default function Dashboard() {
             <StatCard title="Total Pengguna Aktif" value={stats.total_user_aktif} icon={Users} tone="slate" testid="stat-total-users" />
           </div>
 
+          <div>
+            <h3 className="font-heading text-lg font-semibold text-slate-900 mb-3">Status Penilaian — Periode Aktif</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+              <StatCard title="Total Assignment" value={stats.total_assignment_periode_aktif} icon={ClipboardList} tone="emerald" testid="stat-total-assignment" />
+              <StatCard title="Belum Dimulai" value={stats.assignment_belum_dimulai} icon={CircleDot} tone="slate" testid="stat-belum-dimulai" />
+              <StatCard title="Draft" value={stats.assignment_draft} icon={Clock} tone="orange" testid="stat-draft" />
+              <StatCard title="Guru Sudah Assignment" value={stats.guru_sudah_assignment} icon={CheckCircle2} tone="emerald" testid="stat-guru-sudah" />
+              <StatCard title="Guru Belum Assignment" value={stats.guru_belum_assignment} icon={GraduationCap} tone="purple" testid="stat-guru-belum" />
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card className="p-6">
               <h3 className="font-heading text-xl font-semibold text-slate-900 mb-1">Akses Cepat</h3>
@@ -105,6 +120,10 @@ export default function Dashboard() {
                 </Button>
                 <Button variant="outline" className="justify-between h-auto py-3" onClick={() => navigate("/guru")} data-testid="shortcut-guru">
                   <span className="flex items-center gap-2"><GraduationCap className="w-4 h-4" /> Guru</span>
+                  <ArrowRight className="w-4 h-4" />
+                </Button>
+                <Button variant="outline" className="justify-between h-auto py-3" onClick={() => navigate("/assignments")} data-testid="shortcut-assignments">
+                  <span className="flex items-center gap-2"><ClipboardList className="w-4 h-4" /> Assignment</span>
                   <ArrowRight className="w-4 h-4" />
                 </Button>
                 <Button variant="outline" className="justify-between h-auto py-3" onClick={() => navigate("/permissions")} data-testid="shortcut-permissions">
@@ -152,12 +171,22 @@ export default function Dashboard() {
             </Card>
           </div>
           <Card className="p-6 border-dashed">
-            <div className="flex items-center gap-3 text-slate-500">
-              <Clock className="w-5 h-5" />
-              <div>
-                <div className="font-medium text-slate-700">Assignment Penilaian</div>
-                <div className="text-sm">Tugas penilaian per semester akan ditampilkan di sini pada tahap berikutnya.</div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 text-slate-700">
+                <ClipboardList className="w-5 h-5 text-emerald-700" />
+                <div>
+                  <div className="font-medium">Assignment Penilaian Saya</div>
+                  <div className="text-sm text-slate-500">{stats.assignment_saya || 0} assignment pada periode aktif</div>
+                </div>
               </div>
+              <Button variant="outline" size="sm" onClick={() => navigate("/assignments")} data-testid="goto-assignments">
+                Buka <ArrowRight className="w-3.5 h-3.5 ml-1" />
+              </Button>
+            </div>
+            <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-slate-100">
+              <div><div className="text-xs text-slate-500">Total</div><div className="text-2xl font-bold text-slate-900">{stats.assignment_saya || 0}</div></div>
+              <div><div className="text-xs text-slate-500">Belum Dimulai</div><div className="text-2xl font-bold text-slate-900">{stats.assignment_belum_dimulai || 0}</div></div>
+              <div><div className="text-xs text-slate-500">Draft</div><div className="text-2xl font-bold text-amber-700">{stats.assignment_draft || 0}</div></div>
             </div>
           </Card>
         </>
@@ -165,23 +194,24 @@ export default function Dashboard() {
 
       {user.role === "kepala_sekolah" && (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <StatCard title="Total Guru di Sekolah" value={stats.total_guru_sekolah} icon={GraduationCap} tone="orange" testid="stat-guru-sekolah" />
-            <Card className="p-6">
-              <div className="text-sm text-slate-500 font-medium">Sekolah Anda</div>
-              <div className="flex items-center gap-2 mt-2">
-                <School className="w-5 h-5 text-emerald-700" />
-                <div className="font-heading text-xl font-semibold text-slate-900">{stats.nama_sekolah}</div>
-              </div>
-            </Card>
+            <StatCard title="Sudah Punya Assignment" value={stats.guru_sudah_assignment || 0} icon={CheckCircle2} tone="emerald" testid="stat-guru-sudah-kepsek" />
+            <StatCard title="Belum Punya Assignment" value={stats.guru_belum_assignment || 0} icon={CircleDot} tone="slate" testid="stat-guru-belum-kepsek" />
+            <StatCard title="Assignment Draft" value={stats.assignment_draft || 0} icon={Clock} tone="purple" testid="stat-draft-kepsek" />
           </div>
-          <Card className="p-6 border-dashed">
-            <div className="flex items-center gap-3 text-slate-500">
-              <Clock className="w-5 h-5" />
-              <div>
-                <div className="font-medium text-slate-700">Penilaian Guru</div>
-                <div className="text-sm">Form penilaian guru oleh kepala sekolah akan tersedia di tahap berikutnya.</div>
+          <Card className="p-6">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <School className="w-5 h-5 text-emerald-700" />
+                <div>
+                  <div className="text-sm text-slate-500 font-medium">Sekolah Anda</div>
+                  <div className="font-heading text-lg font-semibold text-slate-900">{stats.nama_sekolah}</div>
+                </div>
               </div>
+              <Button variant="outline" size="sm" onClick={() => navigate("/assignments")} data-testid="goto-assignments-kepsek">
+                Kelola Assignment <ArrowRight className="w-3.5 h-3.5 ml-1" />
+              </Button>
             </div>
           </Card>
         </>
@@ -210,16 +240,26 @@ export default function Dashboard() {
                 </div>
               </div>
             </Card>
-            <Card className="p-6 relative overflow-hidden">
-              <div
-                className="absolute inset-0 opacity-20"
-                style={{ backgroundImage: "url('https://images.unsplash.com/photo-1663246544917-9fa8f65b8359')", backgroundSize: "cover", backgroundPosition: "center" }}
-              />
-              <div className="relative">
-                <div className="text-xs uppercase tracking-[0.2em] font-bold text-orange-600">Hasil Penilaian</div>
-                <h4 className="font-heading text-lg font-semibold text-slate-900 mt-2">Akan Datang</h4>
-                <p className="text-sm text-slate-600 mt-1">Rekap hasil penilaian Anda akan ditampilkan di sini.</p>
-              </div>
+            <Card className="p-6 relative overflow-hidden" data-testid="guru-assignment-card">
+              <div className="text-xs uppercase tracking-[0.2em] font-bold text-orange-600">Status Penilaian</div>
+              {stats.my_assignment ? (
+                <>
+                  <h4 className="font-heading text-xl font-semibold text-slate-900 mt-2">{stats.my_assignment.status}</h4>
+                  <div className="text-sm text-slate-600 mt-3 space-y-1.5">
+                    <div className="flex items-center gap-2"><ClipboardCheck className="w-3.5 h-3.5 text-emerald-700" /> {stats.my_assignment.period_name}</div>
+                    <div className="flex items-center gap-2"><UserCog className="w-3.5 h-3.5 text-emerald-700" /> {stats.my_assignment.assessor_name} ({stats.my_assignment.assessor_role})</div>
+                    <div className="flex items-center gap-2"><Clock className="w-3.5 h-3.5 text-emerald-700" /> Observasi: {stats.my_assignment.observation_date || "Belum dijadwalkan"}</div>
+                  </div>
+                  <Button variant="outline" size="sm" className="mt-4" onClick={() => navigate("/penilaian-saya")} data-testid="goto-my-assessment">
+                    Lihat Detail <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <h4 className="font-heading text-lg font-semibold text-slate-900 mt-2">Belum ada assignment</h4>
+                  <p className="text-sm text-slate-600 mt-1">Anda belum ditunjuk dalam penilaian periode aktif.</p>
+                </>
+              )}
             </Card>
           </div>
         </>

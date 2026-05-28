@@ -16,6 +16,8 @@ import {
   CalendarCheck2,
   Layers,
   ListChecks,
+  ClipboardList,
+  ClipboardCheck,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -43,6 +45,10 @@ const MENU = [
   { to: "/periode-penilaian", label: "Periode Penilaian", icon: CalendarCheck2, roles: ["admin", "pengawas", "kepala_sekolah", "guru"], testid: "menu-periode" },
   { to: "/komponen-observasi", label: "Komponen Observasi", icon: Layers, roles: ["admin", "pengawas", "kepala_sekolah", "guru"], testid: "menu-komponen" },
   { to: "/aspek-penilaian", label: "Aspek Penilaian", icon: ListChecks, roles: ["admin"], testid: "menu-aspek" },
+  { section: "Penilaian", roles: ["admin", "pengawas", "kepala_sekolah", "guru"] },
+  { to: "/assignments", label: "Assignment Penilaian", icon: ClipboardList, roles: ["admin"], testid: "menu-assignments" },
+  { to: "/assignments", label: "Penilaian Saya", icon: ClipboardCheck, roles: ["pengawas", "kepala_sekolah"], testid: "menu-penilaian-saya" },
+  { to: "/penilaian-saya", label: "Penilaian Saya", icon: ClipboardCheck, roles: ["guru"], testid: "menu-penilaian-saya-guru" },
   { section: "Sistem", roles: ["admin"] },
   { to: "/permissions", label: "Pengaturan Hak Akses", icon: ShieldCheck, roles: ["admin"], testid: "menu-permissions" },
 ];
