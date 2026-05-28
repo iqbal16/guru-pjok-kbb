@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -17,8 +17,12 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState("");
 
+  useEffect(() => {
+    if (user) navigate("/", { replace: true });
+  }, [user, navigate]);
+
   if (user) {
-    navigate("/", { replace: true });
+    return null;
   }
 
   const onSubmit = async (e) => {
