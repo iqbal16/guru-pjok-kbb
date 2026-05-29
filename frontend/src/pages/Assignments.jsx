@@ -11,7 +11,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Pencil, Trash2, Inbox, Play, ClipboardList, Eye } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Plus, Search, Pencil, Trash2, Inbox, Play, ClipboardList, Eye, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 
 const STATUS_TONE = {
@@ -20,8 +21,13 @@ const STATUS_TONE = {
   "Final": "bg-emerald-100 text-emerald-700",
 };
 
+const ROLE_LABEL = {
+  "Kepala Sekolah": "Penilaian oleh Kepala Sekolah",
+  Pengawas: "Penilaian oleh Pengawas",
+};
+
 function StatusBadge({ status }) {
-  return <Badge className={`${STATUS_TONE[status] || "bg-slate-100 text-slate-700"} hover:${STATUS_TONE[status] || "bg-slate-100"} border-0`}>{status}</Badge>;
+  return <Badge className={`${STATUS_TONE[status] || "bg-slate-100 text-slate-700"} border-0`}>{status}</Badge>;
 }
 
 export default function Assignments() {
@@ -29,11 +35,10 @@ export default function Assignments() {
   const isAdmin = user.role === "admin";
   const isPengawas = user.role === "pengawas";
   const isKepsek = user.role === "kepala_sekolah";
-  const canCreate = isAdmin || isKepsek;
+  const canCreate = isAdmin;
 
   const [items, setItems] = useState([]);
   const [teachers, setTeachers] = useState([]);
-  const [assessors, setAssessors] = useState([]); // users with pengawas/kepsek role
   const [active, setActive] = useState(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -42,35 +47,33 @@ export default function Assignments() {
   const [editing, setEditing] = useState(null);
   const [delTarget, setDelTarget] = useState(null);
   const [detail, setDetail] = useState(null);
-  const [form, setForm] = useState({ teacher_id: "", assessor_user_id: "", observation_date: "", notes: "" });
+  const [selectedInfo, setSelectedInfo] = useState(null);
+  const [optionLoading, setOptionLoading] = useState(false);
+  const [form, setForm] = useState({
+    teacher_id: "",
+    include_principal: false,
+    include_supervisor: false,
+    principal_assessor_id: "",
+    supervisor_assessor_id: "",
+    observation_date: "",
+    notes: "",
+  });
 
   const load = async () => {
     setLoading(true);
     try {
       const calls = [api.get("/assignments"), api.get("/assessment-periods/active")];
-      if (canCreate) {
-        calls.push(api.get("/teachers"));
-        if (isAdmin) calls.push(api.get("/users"));
-      }
+      if (canCreate) calls.push(api.get("/teachers"));
       const res = await Promise.all(calls);
       setItems(res[0].data);
       setActive(res[1].data?.active || null);
-      if (canCreate) {
-        setTeachers(res[2].data);
-        if (isAdmin) {
-          setAssessors(res[3].data.filter((u) => ["pengawas", "kepala_sekolah"].includes(u.role) && u.status === "aktif"));
-        }
-      }
-    } finally { setLoading(false); }
+      if (canCreate) setTeachers(res[2].data);
+    } finally {
+      setLoading(false);
+    }
   };
-  useEffect(() => { load(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // For kepsek: assessors = themselves
-  const effectiveAssessors = useMemo(() => {
-    if (isAdmin) return assessors;
-    if (isKepsek) return [{ id: user.id, name: user.name, role: "kepala_sekolah" }];
-    return [];
-  }, [isAdmin, isKepsek, assessors, user]);
+  useEffect(() => { load(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => items.filter((a) => {
     if (filterStatus !== "semua" && a.status !== filterStatus) return false;
@@ -78,9 +81,44 @@ export default function Assignments() {
     const q = search.toLowerCase();
     return (a.teacher_name || "").toLowerCase().includes(q) ||
            (a.assessor_name || "").toLowerCase().includes(q) ||
+           (a.assessor_role || "").toLowerCase().includes(q) ||
            (a.teacher_nip || "").includes(q) ||
            (a.school_name || "").toLowerCase().includes(q);
   }), [items, search, filterStatus]);
+
+  const chooseTeacher = async (teacherId) => {
+    setForm((prev) => ({
+      ...prev,
+      teacher_id: teacherId,
+      include_principal: false,
+      include_supervisor: false,
+      principal_assessor_id: "",
+      supervisor_assessor_id: "",
+    }));
+    setSelectedInfo(null);
+    if (!teacherId) return;
+    setOptionLoading(true);
+    try {
+      const { data } = await api.get(`/assignments/options/${teacherId}`);
+      const principalId = data.principal_assessor?.id || "";
+      const supervisorId = data.supervisor_assessors?.[0]?.id || "";
+      const hasPrincipal = !!data.existing_assignments?.["Kepala Sekolah"];
+      const hasSupervisor = !!data.existing_assignments?.Pengawas;
+      setSelectedInfo(data);
+      setForm((prev) => ({
+        ...prev,
+        teacher_id: teacherId,
+        principal_assessor_id: principalId,
+        supervisor_assessor_id: supervisorId,
+        include_principal: !!principalId && !hasPrincipal,
+        include_supervisor: !!supervisorId && !hasSupervisor,
+      }));
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Gagal membaca opsi penilai");
+    } finally {
+      setOptionLoading(false);
+    }
+  };
 
   const openAdd = () => {
     if (!active) {
@@ -88,9 +126,13 @@ export default function Assignments() {
       return;
     }
     setEditing(null);
+    setSelectedInfo(null);
     setForm({
       teacher_id: "",
-      assessor_user_id: isKepsek ? user.id : "",
+      include_principal: false,
+      include_supervisor: false,
+      principal_assessor_id: "",
+      supervisor_assessor_id: "",
       observation_date: "",
       notes: "",
     });
@@ -99,26 +141,66 @@ export default function Assignments() {
 
   const openEdit = (a) => {
     setEditing(a);
+    setSelectedInfo(null);
     setForm({
       teacher_id: a.teacher_id,
-      assessor_user_id: a.assessor_user_id,
+      include_principal: false,
+      include_supervisor: false,
+      principal_assessor_id: "",
+      supervisor_assessor_id: "",
       observation_date: a.observation_date || "",
       notes: a.notes || "",
     });
     setOpen(true);
   };
 
+  const validateCreate = () => {
+    if (!form.teacher_id) return "Pilih guru terlebih dahulu.";
+    if (!form.include_principal && !form.include_supervisor) return "Pilih minimal satu jenis penilaian.";
+    if (form.include_principal) {
+      if (selectedInfo?.existing_assignments?.["Kepala Sekolah"]) return "Guru ini sudah memiliki Penilaian oleh Kepala Sekolah pada periode aktif.";
+      if (!selectedInfo?.principal_assessor) return "Kepala Sekolah untuk sekolah guru ini belum ditemukan.";
+    }
+    if (form.include_supervisor) {
+      if (selectedInfo?.existing_assignments?.Pengawas) return "Guru ini sudah memiliki Penilaian oleh Pengawas pada periode aktif.";
+      if (!form.supervisor_assessor_id) return "Pengawas sesuai wilayah sekolah guru ini belum dipilih.";
+    }
+    return "";
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     try {
       if (editing) {
-        await api.put(`/assignments/${editing.id}`, form);
+        await api.put(`/assignments/${editing.id}`, {
+          observation_date: form.observation_date,
+          notes: form.notes,
+        });
         toast.success("Assignment diperbarui");
       } else {
-        await api.post("/assignments", form);
-        toast.success("Assignment dibuat");
+        const err = validateCreate();
+        if (err) {
+          toast.error(err);
+          return;
+        }
+        const payloadBase = {
+          teacher_id: form.teacher_id,
+          observation_date: form.observation_date,
+          notes: form.notes,
+          assignment_type: "Penilaian Utama",
+        };
+        const requests = [];
+        if (form.include_principal) {
+          requests.push(api.post("/assignments", { ...payloadBase, assessor_user_id: selectedInfo.principal_assessor.id }));
+        }
+        if (form.include_supervisor) {
+          requests.push(api.post("/assignments", { ...payloadBase, assessor_user_id: form.supervisor_assessor_id }));
+        }
+        await Promise.all(requests);
+        toast.success(requests.length === 2 ? "Assignment Kepala Sekolah dan Pengawas dibuat" : "Assignment dibuat");
       }
-      setOpen(false); await load();
+      setOpen(false);
+      await load();
     } catch (e) {
       toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Gagal menyimpan");
     }
@@ -139,14 +221,17 @@ export default function Assignments() {
     try {
       await api.delete(`/assignments/${delTarget.id}`);
       toast.success("Assignment dihapus");
-      setDelTarget(null); await load();
+      setDelTarget(null);
+      await load();
     } catch (e) {
       toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Gagal menghapus");
     }
   };
 
-  // For form: teachers list (kepsek sees only their school's teachers via backend filter)
-  const teacherOptions = teachers;
+  const teacherOptions = teachers.filter((t) => t.status === "aktif");
+  const existingPrincipal = selectedInfo?.existing_assignments?.["Kepala Sekolah"];
+  const existingSupervisor = selectedInfo?.existing_assignments?.Pengawas;
+  const supervisorOptions = selectedInfo?.supervisor_assessors || [];
 
   return (
     <div className="space-y-6" data-testid="assignments-page">
@@ -183,7 +268,7 @@ export default function Assignments() {
             <div className="text-[11px] uppercase tracking-wider text-emerald-700 font-semibold">Periode Aktif</div>
             <div className="text-slate-900 font-semibold">{active.period_name}</div>
           </div>
-          <Badge className="bg-emerald-700 text-white hover:bg-emerald-700 border-0">Aktif</Badge>
+          <Badge className="bg-emerald-700 text-white border-0">Aktif</Badge>
         </Card>
       )}
 
@@ -211,15 +296,16 @@ export default function Assignments() {
               {canCreate && active && <div className="text-sm text-slate-500 mt-1">Tambahkan penugasan baru untuk memulai.</div>}
             </div>
           ) : (
-            <div className="border rounded-lg overflow-hidden">
+            <div className="border rounded-lg overflow-x-auto">
               <Table>
                 <TableHeader className="bg-slate-50">
                   <TableRow>
                     <TableHead>Guru</TableHead>
                     <TableHead>NIP</TableHead>
                     <TableHead>Sekolah</TableHead>
-                    <TableHead>Penilai</TableHead>
-                    <TableHead>Role</TableHead>
+                    <TableHead>Periode Aktif</TableHead>
+                    <TableHead>Penilai Kepala Sekolah</TableHead>
+                    <TableHead>Penilai Pengawas</TableHead>
                     <TableHead>Tgl Observasi</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Aksi</TableHead>
@@ -227,20 +313,24 @@ export default function Assignments() {
                 </TableHeader>
                 <TableBody>
                   {filtered.map((a) => {
-                    const canStart = (isPengawas || isKepsek || isAdmin) && a.assessor_user_id === user.id && a.status === "Belum Dimulai";
-                    const canEdit = isAdmin || (isKepsek && a.school_id);
+                    const canStart = a.assessor_user_id === user.id && a.status === "Belum Dimulai";
+                    const canEdit = isAdmin;
                     return (
                       <TableRow key={a.id} data-testid={`assignment-row-${a.id}`}>
                         <TableCell className="font-medium">{a.teacher_name || "-"}</TableCell>
                         <TableCell className="font-mono text-xs text-slate-600">{a.teacher_nip || "-"}</TableCell>
                         <TableCell className="text-slate-600">{a.school_name || "-"}</TableCell>
-                        <TableCell>{a.assessor_name || "-"}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="text-xs">{a.assessor_role}</Badge>
-                        </TableCell>
+                        <TableCell className="text-slate-600">{a.period_name || active?.period_name || "-"}</TableCell>
+                        <TableCell>{a.assessor_role === "Kepala Sekolah" ? a.assessor_name : "-"}</TableCell>
+                        <TableCell>{a.assessor_role === "Pengawas" ? a.assessor_name : "-"}</TableCell>
                         <TableCell className="text-slate-600 text-sm">{a.observation_date || "-"}</TableCell>
-                        <TableCell><StatusBadge status={a.status} /></TableCell>
-                        <TableCell className="text-right">
+                        <TableCell>
+                          <div className="space-y-1">
+                            <Badge variant="outline" className="text-xs">{ROLE_LABEL[a.assessor_role] || a.assessor_role}</Badge>
+                            <StatusBadge status={a.status} />
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right whitespace-nowrap">
                           <Button size="sm" variant="ghost" onClick={() => setDetail(a)} data-testid={`detail-${a.id}`}>
                             <Eye className="w-4 h-4" />
                           </Button>
@@ -265,41 +355,93 @@ export default function Assignments() {
           )}
       </Card>
 
-      {/* Add/Edit dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>{editing ? "Ubah Assignment" : "Tambah Assignment"}</DialogTitle>
             <DialogDescription>
-              Periode: <span className="font-medium text-slate-900">{active?.period_name || "—"}</span>
+              Periode: <span className="font-medium text-slate-900">{active?.period_name || "-"}</span>
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={submit} className="space-y-4" data-testid="assignment-form">
-            <div className="space-y-2">
-              <Label>Guru yang Dinilai</Label>
-              <Select value={form.teacher_id} onValueChange={(v) => setForm({ ...form, teacher_id: v })}>
-                <SelectTrigger data-testid="assignment-teacher-select"><SelectValue placeholder="Pilih guru" /></SelectTrigger>
-                <SelectContent>
-                  {teacherOptions.filter((t) => t.status === "aktif").map((t) => (
-                    <SelectItem key={t.id} value={t.id}>{t.name} {t.nip ? `(${t.nip})` : ""}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Penilai</Label>
-              <Select value={form.assessor_user_id} onValueChange={(v) => setForm({ ...form, assessor_user_id: v })} disabled={isKepsek}>
-                <SelectTrigger data-testid="assignment-assessor-select"><SelectValue placeholder="Pilih penilai" /></SelectTrigger>
-                <SelectContent>
-                  {effectiveAssessors.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>
-                      {u.name} ({u.role === "pengawas" ? "Pengawas" : "Kepala Sekolah"})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {isKepsek && <div className="text-[11px] text-slate-500">Sebagai Kepala Sekolah, Anda otomatis menjadi penilai.</div>}
-            </div>
+            {editing ? (
+              <Card className="p-4 bg-slate-50">
+                <div className="text-sm font-semibold text-slate-900">{editing.teacher_name}</div>
+                <div className="text-xs text-slate-500 mt-1">{ROLE_LABEL[editing.assessor_role] || editing.assessor_role}: {editing.assessor_name}</div>
+              </Card>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label>Guru yang Dinilai</Label>
+                  <Select value={form.teacher_id} onValueChange={chooseTeacher}>
+                    <SelectTrigger data-testid="assignment-teacher-select"><SelectValue placeholder="Pilih guru" /></SelectTrigger>
+                    <SelectContent>
+                      {teacherOptions.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>{t.name} {t.nip ? `(${t.nip})` : ""}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {optionLoading && <div className="text-sm text-slate-500">Membaca data sekolah dan penilai...</div>}
+
+                {selectedInfo && (
+                  <Card className="p-4 bg-slate-50 space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                      <Info label="Guru" value={selectedInfo.teacher?.name} />
+                      <Info label="NIP" value={selectedInfo.teacher?.nip || "-"} />
+                      <Info label="Sekolah" value={selectedInfo.school?.school_name || "-"} />
+                      <Info label="Wilayah" value={selectedInfo.school?.subdistrict || "-"} />
+                    </div>
+
+                    <div className="space-y-3 pt-2 border-t border-slate-200">
+                      <RoleOption
+                        checked={form.include_principal}
+                        disabled={!selectedInfo.principal_assessor || !!existingPrincipal}
+                        onCheckedChange={(v) => setForm({ ...form, include_principal: !!v })}
+                        title="Penilaian oleh Kepala Sekolah"
+                        value={selectedInfo.principal_assessor?.name}
+                        empty="Kepala Sekolah untuk sekolah guru ini belum ditemukan."
+                        existing={existingPrincipal}
+                      />
+
+                      {isAdmin && (
+                        <div className="rounded-lg border border-slate-200 bg-white p-3">
+                          <div className="flex items-start gap-3">
+                            <Checkbox
+                              checked={form.include_supervisor}
+                              disabled={supervisorOptions.length === 0 || !!existingSupervisor}
+                              onCheckedChange={(v) => setForm({ ...form, include_supervisor: !!v })}
+                              data-testid="assignment-include-supervisor"
+                            />
+                            <div className="flex-1 space-y-2">
+                              <div className="font-medium text-slate-900">Penilaian oleh Pengawas</div>
+                              {existingSupervisor ? (
+                                <ValidationNote text={`Sudah ada: ${existingSupervisor.assessor_name}`} />
+                              ) : supervisorOptions.length === 0 ? (
+                                <ValidationNote text="Pengawas sesuai wilayah sekolah guru ini belum ditemukan." />
+                              ) : supervisorOptions.length === 1 ? (
+                                <div className="text-sm text-slate-600">{supervisorOptions[0].name}</div>
+                              ) : (
+                                <Select value={form.supervisor_assessor_id} onValueChange={(v) => setForm({ ...form, supervisor_assessor_id: v })}>
+                                  <SelectTrigger data-testid="assignment-supervisor-select"><SelectValue placeholder="Pilih pengawas" /></SelectTrigger>
+                                  <SelectContent>
+                                    {supervisorOptions.map((u) => (
+                                      <SelectItem key={u.id} value={u.id}>{u.name} ({u.work_area})</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </Card>
+                )}
+              </>
+            )}
+
             <div className="space-y-2">
               <Label>Tanggal Observasi (opsional)</Label>
               <Input type="date" value={form.observation_date} onChange={(e) => setForm({ ...form, observation_date: e.target.value })} />
@@ -318,7 +460,6 @@ export default function Assignments() {
         </DialogContent>
       </Dialog>
 
-      {/* Detail dialog */}
       <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
         <DialogContent>
           <DialogHeader>
@@ -329,9 +470,9 @@ export default function Assignments() {
               <Row label="Guru" value={detail.teacher_name} />
               <Row label="NIP" value={detail.teacher_nip || "-"} />
               <Row label="Sekolah" value={detail.school_name || "-"} />
-              <Row label="Penilai" value={`${detail.assessor_name} (${detail.assessor_role})`} />
+              <Row label={detail.assessor_role === "Pengawas" ? "Penilai Pengawas" : "Penilai Kepala Sekolah"} value={detail.assessor_name || "-"} />
               <Row label="Periode" value={detail.period_name} />
-              <Row label="Jenis" value={detail.assignment_type} />
+              <Row label="Jenis" value={ROLE_LABEL[detail.assessor_role] || detail.assignment_type} />
               <Row label="Tanggal Observasi" value={detail.observation_date || "Belum diatur"} />
               <Row label="Status" value={<StatusBadge status={detail.status} />} />
               <Row label="Catatan" value={detail.notes || "-"} />
@@ -358,10 +499,43 @@ export default function Assignments() {
   );
 }
 
+function Info({ label, value }) {
+  return (
+    <div>
+      <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">{label}</div>
+      <div className="text-slate-900 font-medium">{value || "-"}</div>
+    </div>
+  );
+}
+
+function RoleOption({ checked, disabled, onCheckedChange, title, value, empty, existing }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="flex items-start gap-3">
+        <Checkbox checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} data-testid="assignment-include-principal" />
+        <div className="flex-1">
+          <div className="font-medium text-slate-900">{title}</div>
+          {existing ? <ValidationNote text={`Sudah ada: ${existing.assessor_name}`} /> :
+            value ? <div className="text-sm text-slate-600 mt-1">{value}</div> : <ValidationNote text={empty} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ValidationNote({ text }) {
+  return (
+    <div className="text-sm text-amber-700 mt-1 flex items-start gap-2">
+      <AlertCircle className="w-4 h-4 mt-0.5" />
+      <span>{text}</span>
+    </div>
+  );
+}
+
 function Row({ label, value }) {
   return (
     <div className="flex items-start justify-between gap-4 py-1.5 border-b border-slate-100 last:border-0">
-      <div className="text-slate-500 min-w-[140px]">{label}</div>
+      <div className="text-slate-500 min-w-[150px]">{label}</div>
       <div className="text-slate-900 font-medium text-right flex-1">{value}</div>
     </div>
   );

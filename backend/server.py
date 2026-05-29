@@ -262,10 +262,19 @@ async def dashboard_stats(user=Depends(get_current_user)):
     active_id = (active or {}).get("id")
     if role == "admin":
         total_teachers = await db.teachers.count_documents({"status": "aktif"})
-        with_assignment = 0
+        with_assignment = complete_assignment = 0
+        total_kepsek = total_pengawas = 0
+        missing_kepsek = missing_pengawas = total_teachers
         belum = draft = 0
         if active_id:
             with_assignment = len(await db.assessment_assignments.distinct("teacher_id", {"assessment_period_id": active_id, "assignment_type": "Penilaian Utama"}))
+            kepsek_ids = set(await db.assessment_assignments.distinct("teacher_id", {"assessment_period_id": active_id, "assignment_type": "Penilaian Utama", "assessor_role": "Kepala Sekolah"}))
+            pengawas_ids = set(await db.assessment_assignments.distinct("teacher_id", {"assessment_period_id": active_id, "assignment_type": "Penilaian Utama", "assessor_role": "Pengawas"}))
+            complete_assignment = len(kepsek_ids & pengawas_ids)
+            total_kepsek = await db.assessment_assignments.count_documents({"assessment_period_id": active_id, "assignment_type": "Penilaian Utama", "assessor_role": "Kepala Sekolah"})
+            total_pengawas = await db.assessment_assignments.count_documents({"assessment_period_id": active_id, "assignment_type": "Penilaian Utama", "assessor_role": "Pengawas"})
+            missing_kepsek = max(total_teachers - len(kepsek_ids), 0)
+            missing_pengawas = max(total_teachers - len(pengawas_ids), 0)
             belum = await db.assessment_assignments.count_documents({"assessment_period_id": active_id, "status": "Belum Dimulai"})
             draft = await db.assessment_assignments.count_documents({"assessment_period_id": active_id, "status": "Draft"})
         return {
@@ -279,6 +288,11 @@ async def dashboard_stats(user=Depends(get_current_user)):
             "assignment_draft": draft,
             "guru_sudah_assignment": with_assignment,
             "guru_belum_assignment": max(total_teachers - with_assignment, 0),
+            "total_assignment_kepala_sekolah": total_kepsek,
+            "total_assignment_pengawas": total_pengawas,
+            "guru_assignment_lengkap": complete_assignment,
+            "guru_belum_assignment_kepala_sekolah": missing_kepsek,
+            "guru_belum_assignment_pengawas": missing_pengawas,
         }
     if role == "pengawas":
         sup = await db.supervisors.find_one({"user_id": user["id"]}, {"_id": 0})
@@ -330,16 +344,18 @@ async def dashboard_stats(user=Depends(get_current_user)):
         teacher = await db.teachers.find_one({"id": user["linked_profile_id"]}, {"_id": 0})
     school = await db.schools.find_one({"id": (teacher or {}).get("school_id")}, {"_id": 0}) if teacher else None
     my_assignment = None
+    my_assignments = []
     if teacher and active_id:
-        a = await db.assessment_assignments.find_one({"teacher_id": teacher["id"], "assessment_period_id": active_id}, {"_id": 0})
-        if a:
-            await _enrich_assignments([a])
-            my_assignment = a
+        my_assignments = await db.assessment_assignments.find({"teacher_id": teacher["id"], "assessment_period_id": active_id}, {"_id": 0}).sort("assessor_role", 1).to_list(10)
+        if my_assignments:
+            await _enrich_assignments(my_assignments)
+            my_assignment = my_assignments[0]
     return {
         "profil": teacher,
         "sekolah": school,
         "mata_pelajaran": (teacher or {}).get("subject", "PJOK"),
         "my_assignment": my_assignment,
+        "my_assignments": my_assignments,
     }
 
 # ---------------------------------------------------------------------------
@@ -959,6 +975,44 @@ class AssignmentUpdate(BaseModel):
 async def _get_active_period():
     return await db.assessment_periods.find_one({"is_active": True}, {"_id": 0})
 
+def _assessor_role_label(assessor: dict) -> str:
+    return "Pengawas" if assessor.get("role") == "pengawas" else "Kepala Sekolah"
+
+async def _principal_assessor_for_school(school_id: Optional[str]):
+    if not school_id:
+        return None
+    principals = await db.principals.find({"school_id": school_id, "status": "aktif"}, {"_id": 0}).to_list(20)
+    for principal in principals:
+        if not principal.get("user_id"):
+            continue
+        user = await db.users.find_one({"id": principal["user_id"], "role": "kepala_sekolah", "status": "aktif"}, {"_id": 0, "password_hash": 0})
+        if user:
+            return {"id": user["id"], "name": user["name"], "email": user.get("email"), "role": user["role"], "profile_id": principal["id"]}
+    return None
+
+async def _supervisor_assessors_for_school(school: Optional[dict]):
+    if not school:
+        return []
+    subdistrict = (school or {}).get("subdistrict")
+    if not subdistrict:
+        return []
+    supervisors = await db.supervisors.find({"work_area": subdistrict, "status": "aktif"}, {"_id": 0}).to_list(100)
+    out = []
+    for supervisor in supervisors:
+        if not supervisor.get("user_id"):
+            continue
+        user = await db.users.find_one({"id": supervisor["user_id"], "role": "pengawas", "status": "aktif"}, {"_id": 0, "password_hash": 0})
+        if user:
+            out.append({
+                "id": user["id"],
+                "name": user["name"],
+                "email": user.get("email"),
+                "role": user["role"],
+                "profile_id": supervisor["id"],
+                "work_area": supervisor.get("work_area"),
+            })
+    return out
+
 async def _enrich_assignments(items):
     if not items:
         return items
@@ -1012,6 +1066,8 @@ async def _validate_assignment(teacher_id, assessor_user_id, period_id, creator)
         if not creator_school or creator_school != teacher.get("school_id"):
             raise HTTPException(status_code=403, detail="Anda hanya boleh membuat assignment untuk guru di sekolah Anda")
 
+    school = await db.schools.find_one({"id": teacher.get("school_id")}, {"_id": 0})
+
     # If assessor is kepsek, school must match
     if assessor.get("role") == "kepala_sekolah":
         principal = await db.principals.find_one({"user_id": assessor_user_id}, {"_id": 0})
@@ -1020,6 +1076,13 @@ async def _validate_assignment(teacher_id, assessor_user_id, period_id, creator)
         kepsek_school = (principal or {}).get("school_id")
         if not kepsek_school or kepsek_school != teacher.get("school_id"):
             raise HTTPException(status_code=400, detail="Kepala Sekolah hanya boleh menilai guru di sekolahnya sendiri")
+    elif assessor.get("role") == "pengawas":
+        supervisor = await db.supervisors.find_one({"user_id": assessor_user_id}, {"_id": 0})
+        if not supervisor and assessor.get("linked_profile_id"):
+            supervisor = await db.supervisors.find_one({"id": assessor["linked_profile_id"]}, {"_id": 0})
+        work_area = (supervisor or {}).get("work_area")
+        if not work_area or not school or work_area != school.get("subdistrict"):
+            raise HTTPException(status_code=400, detail="Pengawas hanya boleh menilai guru pada wilayah sekolah yang sesuai")
 
     return teacher, assessor, period
 
@@ -1062,27 +1125,54 @@ async def my_assignment(user=Depends(get_current_user)):
     await _enrich_assignments(items)
     return {"active_period": period, "assignments": items}
 
+@api.get("/assignments/options/{teacher_id}")
+async def assignment_options(teacher_id: str, user=Depends(require_roles("admin"))):
+    teacher = await db.teachers.find_one({"id": teacher_id}, {"_id": 0})
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Guru tidak ditemukan")
+    school = await db.schools.find_one({"id": teacher.get("school_id")}, {"_id": 0})
+    period = await _get_active_period()
+    existing = {}
+    existing_items = []
+    if period:
+        existing_items = await db.assessment_assignments.find({
+            "teacher_id": teacher["id"],
+            "assessment_period_id": period["id"],
+            "assignment_type": "Penilaian Utama",
+        }, {"_id": 0}).to_list(10)
+        await _enrich_assignments(existing_items)
+        existing = {x.get("assessor_role"): x for x in existing_items}
+    return {
+        "teacher": teacher,
+        "school": school,
+        "active_period": period,
+        "principal_assessor": await _principal_assessor_for_school(teacher.get("school_id")),
+        "supervisor_assessors": await _supervisor_assessors_for_school(school),
+        "existing_assignments": existing,
+    }
+
 @api.post("/assignments")
-async def create_assignment(body: AssignmentCreate, user=Depends(require_roles("admin", "kepala_sekolah"))):
+async def create_assignment(body: AssignmentCreate, user=Depends(require_roles("admin"))):
     teacher, assessor, period = await _validate_assignment(
         body.teacher_id, body.assessor_user_id, body.assessment_period_id, user
     )
     a_type = body.assignment_type or "Penilaian Utama"
-    # Uniqueness: Penilaian Utama must be unique per (teacher, period)
+    role_label = _assessor_role_label(assessor)
+    # Uniqueness: one main assessment per assessor role for each teacher/period.
     if a_type == "Penilaian Utama":
         dup = await db.assessment_assignments.find_one({
             "teacher_id": body.teacher_id,
             "assessment_period_id": period["id"],
-            "assignment_type": "Penilaian Utama",
+            "assessor_role": role_label,
         })
         if dup:
-            raise HTTPException(status_code=400, detail="Guru ini sudah memiliki penilaian utama pada periode ini.")
+            raise HTTPException(status_code=400, detail=f"Guru ini sudah memiliki Penilaian Utama oleh {role_label} pada periode ini.")
     doc = {
         "id": str(uuid.uuid4()),
         "teacher_id": teacher["id"],
         "school_id": teacher.get("school_id"),
         "assessor_user_id": assessor["id"],
-        "assessor_role": "Pengawas" if assessor["role"] == "pengawas" else "Kepala Sekolah",
+        "assessor_role": role_label,
         "assessment_period_id": period["id"],
         "observation_date": body.observation_date or "",
         "assignment_type": a_type,
@@ -1099,18 +1189,12 @@ async def create_assignment(body: AssignmentCreate, user=Depends(require_roles("
     return doc
 
 @api.put("/assignments/{aid}")
-async def update_assignment(aid: str, body: AssignmentUpdate, user=Depends(require_roles("admin", "kepala_sekolah"))):
+async def update_assignment(aid: str, body: AssignmentUpdate, user=Depends(require_roles("admin"))):
     existing = await db.assessment_assignments.find_one({"id": aid})
     if not existing:
         raise HTTPException(status_code=404, detail="Assignment tidak ditemukan")
     if existing.get("status") in ASSIGNMENT_FINAL:
         raise HTTPException(status_code=400, detail="Assignment final tidak dapat diubah")
-    # Kepsek can only edit assignments in their school
-    if user["role"] == "kepala_sekolah":
-        scope = await _scope_for_role(user)
-        if scope.get("school_id") != existing.get("school_id"):
-            raise HTTPException(status_code=403, detail="Anda tidak berhak mengubah assignment ini")
-
     upd = body.model_dump(exclude_unset=True)
     new_teacher_id = upd.get("teacher_id", existing["teacher_id"])
     new_assessor_id = upd.get("assessor_user_id", existing["assessor_user_id"])
@@ -1119,18 +1203,19 @@ async def update_assignment(aid: str, body: AssignmentUpdate, user=Depends(requi
     teacher, assessor, period = await _validate_assignment(
         new_teacher_id, new_assessor_id, existing["assessment_period_id"], user
     )
+    role_label = _assessor_role_label(assessor)
     if new_type == "Penilaian Utama":
         dup = await db.assessment_assignments.find_one({
             "teacher_id": new_teacher_id,
             "assessment_period_id": existing["assessment_period_id"],
-            "assignment_type": "Penilaian Utama",
+            "assessor_role": role_label,
             "id": {"$ne": aid},
         })
         if dup:
-            raise HTTPException(status_code=400, detail="Guru ini sudah memiliki penilaian utama pada periode ini.")
+            raise HTTPException(status_code=400, detail=f"Guru ini sudah memiliki Penilaian Utama oleh {role_label} pada periode ini.")
 
     upd["school_id"] = teacher.get("school_id")
-    upd["assessor_role"] = "Pengawas" if assessor["role"] == "pengawas" else "Kepala Sekolah"
+    upd["assessor_role"] = role_label
     upd["updated_at"] = now_iso()
     await db.assessment_assignments.update_one({"id": aid}, {"$set": upd})
     await audit(user["id"], "update", "assessment_assignments", aid, clean(existing), upd)
@@ -1139,16 +1224,12 @@ async def update_assignment(aid: str, body: AssignmentUpdate, user=Depends(requi
     return new_doc
 
 @api.delete("/assignments/{aid}")
-async def delete_assignment(aid: str, user=Depends(require_roles("admin", "kepala_sekolah"))):
+async def delete_assignment(aid: str, user=Depends(require_roles("admin"))):
     existing = await db.assessment_assignments.find_one({"id": aid})
     if not existing:
         raise HTTPException(status_code=404, detail="Assignment tidak ditemukan")
     if existing.get("status") in ASSIGNMENT_FINAL:
         raise HTTPException(status_code=400, detail="Assignment final tidak dapat dihapus")
-    if user["role"] == "kepala_sekolah":
-        scope = await _scope_for_role(user)
-        if scope.get("school_id") != existing.get("school_id"):
-            raise HTTPException(status_code=403, detail="Anda tidak berhak menghapus assignment ini")
     await db.assessment_assignments.delete_one({"id": aid})
     await audit(user["id"], "delete", "assessment_assignments", aid, clean(existing), None)
     return {"ok": True}
@@ -1328,8 +1409,12 @@ async def on_startup():
     await db.semesters.create_index("semester_order", unique=True)
     await db.assessment_periods.create_index([("academic_year_id", 1), ("semester_id", 1)], unique=True)
     await db.observation_categories.create_index("category_name", unique=True)
+    try:
+        await db.assessment_assignments.drop_index("teacher_id_1_assessment_period_id_1_assignment_type_1")
+    except Exception:
+        pass
     await db.assessment_assignments.create_index(
-        [("teacher_id", 1), ("assessment_period_id", 1), ("assignment_type", 1)],
+        [("teacher_id", 1), ("assessment_period_id", 1), ("assessor_role", 1)],
         unique=True,
     )
     await seed_permissions()

@@ -65,6 +65,12 @@ export default function Dashboard() {
     return <div className="text-slate-500 text-sm">Memuat data dashboard...</div>;
   }
 
+  const guruAssignments = stats.my_assignments || [];
+  const guruAssignmentByRole = guruAssignments.reduce((acc, item) => {
+    acc[item.assessor_role] = item;
+    return acc;
+  }, {});
+
   return (
     <div className="space-y-8" data-testid="dashboard-page">
       <div className="flex items-start justify-between flex-wrap gap-4">
@@ -97,11 +103,11 @@ export default function Dashboard() {
           <div>
             <h3 className="font-heading text-lg font-semibold text-slate-900 mb-3">Status Penilaian — Periode Aktif</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-              <StatCard title="Total Assignment" value={stats.total_assignment_periode_aktif} icon={ClipboardList} tone="emerald" testid="stat-total-assignment" />
-              <StatCard title="Belum Dimulai" value={stats.assignment_belum_dimulai} icon={CircleDot} tone="slate" testid="stat-belum-dimulai" />
-              <StatCard title="Draft" value={stats.assignment_draft} icon={Clock} tone="orange" testid="stat-draft" />
-              <StatCard title="Guru Sudah Assignment" value={stats.guru_sudah_assignment} icon={CheckCircle2} tone="emerald" testid="stat-guru-sudah" />
-              <StatCard title="Guru Belum Assignment" value={stats.guru_belum_assignment} icon={GraduationCap} tone="purple" testid="stat-guru-belum" />
+              <StatCard title="Assignment Kepala Sekolah" value={stats.total_assignment_kepala_sekolah || 0} icon={ClipboardList} tone="emerald" testid="stat-assignment-kepsek" />
+              <StatCard title="Assignment Pengawas" value={stats.total_assignment_pengawas || 0} icon={ClipboardCheck} tone="blue" testid="stat-assignment-pengawas" />
+              <StatCard title="Assignment Lengkap" value={stats.guru_assignment_lengkap || 0} icon={CheckCircle2} tone="emerald" testid="stat-assignment-lengkap" />
+              <StatCard title="Belum Ada Kepala Sekolah" value={stats.guru_belum_assignment_kepala_sekolah || 0} icon={CircleDot} tone="slate" testid="stat-belum-kepsek" />
+              <StatCard title="Belum Ada Pengawas" value={stats.guru_belum_assignment_pengawas || 0} icon={GraduationCap} tone="purple" testid="stat-belum-pengawas" />
             </div>
           </div>
 
@@ -242,13 +248,29 @@ export default function Dashboard() {
             </Card>
             <Card className="p-6 relative overflow-hidden" data-testid="guru-assignment-card">
               <div className="text-xs uppercase tracking-[0.2em] font-bold text-orange-600">Status Penilaian</div>
-              {stats.my_assignment ? (
+              {guruAssignments.length > 0 ? (
                 <>
-                  <h4 className="font-heading text-xl font-semibold text-slate-900 mt-2">{stats.my_assignment.status}</h4>
-                  <div className="text-sm text-slate-600 mt-3 space-y-1.5">
-                    <div className="flex items-center gap-2"><ClipboardCheck className="w-3.5 h-3.5 text-emerald-700" /> {stats.my_assignment.period_name}</div>
-                    <div className="flex items-center gap-2"><UserCog className="w-3.5 h-3.5 text-emerald-700" /> {stats.my_assignment.assessor_name} ({stats.my_assignment.assessor_role})</div>
-                    <div className="flex items-center gap-2"><Clock className="w-3.5 h-3.5 text-emerald-700" /> Observasi: {stats.my_assignment.observation_date || "Belum dijadwalkan"}</div>
+                  <h4 className="font-heading text-xl font-semibold text-slate-900 mt-2">Periode aktif</h4>
+                  <div className="text-sm text-slate-600 mt-3 space-y-3">
+                    {["Kepala Sekolah", "Pengawas"].map((role) => {
+                      const assignment = guruAssignmentByRole[role];
+                      return (
+                        <div key={role} className="rounded-lg border border-slate-200 p-3">
+                          <div className="font-medium text-slate-900">
+                            {role === "Pengawas" ? "Penilaian Pengawas" : "Penilaian Kepala Sekolah"}
+                          </div>
+                          {assignment ? (
+                            <div className="space-y-1 mt-2">
+                              <div className="flex items-center gap-2"><ClipboardCheck className="w-3.5 h-3.5 text-emerald-700" /> Status: {assignment.status}</div>
+                              <div className="flex items-center gap-2"><UserCog className="w-3.5 h-3.5 text-emerald-700" /> {assignment.assessor_name}</div>
+                              <div className="flex items-center gap-2"><Clock className="w-3.5 h-3.5 text-emerald-700" /> Observasi: {assignment.observation_date || "Belum dijadwalkan"}</div>
+                            </div>
+                          ) : (
+                            <div className="text-slate-500 mt-2">Belum ada assignment</div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                   <Button variant="outline" size="sm" className="mt-4" onClick={() => navigate("/penilaian-saya")} data-testid="goto-my-assessment">
                     Lihat Detail <ArrowRight className="w-3.5 h-3.5 ml-1" />

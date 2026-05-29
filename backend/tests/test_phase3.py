@@ -159,16 +159,52 @@ class TestCreateRBACValidations:
         r = requests.post(f"{API}/assignments", json=body, headers=H(tokens["guru1"]))
         assert r.status_code == 403
 
-    def test_duplicate_penilaian_utama_blocked(self, tokens, lookup):
-        # Ahmad already has a Penilaian Utama (by kepsek)
+    def test_same_teacher_can_have_kepsek_and_pengawas_assignment(self, tokens, lookup):
+        # Ahmad already has a Penilaian Utama by kepsek; pengawas assignment must still be allowed.
+        h = H(tokens["admin"])
         body = {
             "teacher_id": lookup["teacher_ahmad"]["id"],
             "assessor_user_id": lookup["user_pengawas"]["id"],
             "assignment_type": "Penilaian Utama",
+            "notes": "TEST_dual_role_allowed",
+        }
+        existing = requests.get(f"{API}/assignments", headers=h).json()
+        old = next((x for x in existing if x["teacher_id"] == body["teacher_id"] and x["assessor_role"] == "Pengawas"), None)
+        if old:
+            requests.delete(f"{API}/assignments/{old['id']}", headers=h)
+        r = requests.post(f"{API}/assignments", json=body, headers=h)
+        assert r.status_code == 200, r.text
+        assert r.json()["assessor_role"] == "Pengawas"
+        requests.delete(f"{API}/assignments/{r.json()['id']}", headers=h)
+
+    def test_duplicate_kepsek_penilaian_utama_blocked(self, tokens, lookup):
+        body = {
+            "teacher_id": lookup["teacher_ahmad"]["id"],
+            "assessor_user_id": lookup["user_kepsek"]["id"],
+            "assignment_type": "Penilaian Utama",
         }
         r = requests.post(f"{API}/assignments", json=body, headers=H(tokens["admin"]))
         assert r.status_code == 400
-        assert "sudah memiliki penilaian utama" in r.text.lower()
+        assert "kepala sekolah" in r.text.lower()
+
+    def test_duplicate_pengawas_penilaian_utama_blocked(self, tokens, lookup):
+        h = H(tokens["admin"])
+        existing = requests.get(f"{API}/assignments", headers=h).json()
+        old = next((x for x in existing if x["teacher_id"] == lookup["teacher_ahmad"]["id"] and x["assessor_role"] == "Pengawas"), None)
+        if old:
+            requests.delete(f"{API}/assignments/{old['id']}", headers=h)
+        body = {
+            "teacher_id": lookup["teacher_ahmad"]["id"],
+            "assessor_user_id": lookup["user_pengawas"]["id"],
+            "assignment_type": "Penilaian Utama",
+            "notes": "TEST_duplicate_pengawas",
+        }
+        first = requests.post(f"{API}/assignments", json=body, headers=h)
+        assert first.status_code == 200, first.text
+        r = requests.post(f"{API}/assignments", json=body, headers=h)
+        assert r.status_code == 400
+        assert "pengawas" in r.text.lower()
+        requests.delete(f"{API}/assignments/{first.json()['id']}", headers=h)
 
     def test_invalid_assessor_role(self, tokens, lookup):
         # Use a guru as assessor -> 400
@@ -211,10 +247,14 @@ class TestCreateRBACValidations:
 
 # ----------------------- ADMIN CREATE/UPDATE/DELETE happy path -----------------------
 class TestAdminCRUD:
-    def test_admin_create_for_rudi_and_cleanup(self, tokens, lookup):
+    def test_admin_create_pengawas_for_ahmad_and_cleanup(self, tokens, lookup):
         h = H(tokens["admin"])
+        existing = requests.get(f"{API}/assignments", headers=h).json()
+        old = next((x for x in existing if x["teacher_id"] == lookup["teacher_ahmad"]["id"] and x["assessor_role"] == "Pengawas"), None)
+        if old:
+            requests.delete(f"{API}/assignments/{old['id']}", headers=h)
         body = {
-            "teacher_id": lookup["teacher_rudi"]["id"],
+            "teacher_id": lookup["teacher_ahmad"]["id"],
             "assessor_user_id": lookup["user_pengawas"]["id"],
             "observation_date": "2026-02-01",
             "notes": "TEST_phase3",
@@ -223,7 +263,7 @@ class TestAdminCRUD:
         assert r.status_code == 200, r.text
         a = r.json()
         assert a["status"] == "Belum Dimulai"
-        assert a["teacher_name"].startswith("Rudi")
+        assert a["teacher_name"].startswith("Ahmad")
         assert a["assessor_role"] == "Pengawas"
         aid = a["id"]
 
@@ -262,8 +302,12 @@ class TestStartFlow:
     def test_assessor_can_start_then_cannot_restart(self, tokens, lookup):
         # Create fresh assignment so test is idempotent across runs
         h = H(tokens["admin"])
+        existing = requests.get(f"{API}/assignments", headers=h).json()
+        old = next((x for x in existing if x["teacher_id"] == lookup["teacher_ahmad"]["id"] and x["assessor_role"] == "Pengawas"), None)
+        if old:
+            requests.delete(f"{API}/assignments/{old['id']}", headers=h)
         body = {
-            "teacher_id": lookup["teacher_rudi"]["id"],
+            "teacher_id": lookup["teacher_ahmad"]["id"],
             "assessor_user_id": lookup["user_pengawas"]["id"],
         }
         r = requests.post(f"{API}/assignments", json=body, headers=h)
@@ -289,11 +333,13 @@ class TestDashboardStats:
         r = requests.get(f"{API}/dashboard/stats", headers=H(tokens["admin"]))
         assert r.status_code == 200
         d = r.json()
-        for k in ("total_assignment_periode_aktif", "assignment_belum_dimulai",
-                  "assignment_draft", "guru_sudah_assignment", "guru_belum_assignment"):
+        for k in ("total_assignment_kepala_sekolah", "total_assignment_pengawas",
+                  "guru_assignment_lengkap", "guru_belum_assignment_kepala_sekolah",
+                  "guru_belum_assignment_pengawas"):
             assert k in d, k
         assert d["total_assignment_periode_aktif"] >= 2
-        assert d["guru_sudah_assignment"] >= 2
+        assert d["total_assignment_kepala_sekolah"] >= 1
+        assert d["total_assignment_pengawas"] >= 1
 
     def test_pengawas_stats(self, tokens):
         r = requests.get(f"{API}/dashboard/stats", headers=H(tokens["pengawas"]))
@@ -316,11 +362,13 @@ class TestDashboardStats:
         assert r.status_code == 200
         d = r.json()
         assert "my_assignment" in d
+        assert "my_assignments" in d
         ma = d["my_assignment"]
         assert ma is not None
         assert ma.get("period_name")
         assert ma.get("assessor_name")
         assert ma.get("status") in ("Belum Dimulai", "Draft")
+        assert len(d["my_assignments"]) >= 1
 
     def test_guru3_stats_no_assignment(self, tokens):
         r = requests.get(f"{API}/dashboard/stats", headers=H(tokens["guru3"]))
@@ -328,6 +376,7 @@ class TestDashboardStats:
         d = r.json()
         # my_assignment may be None
         assert d.get("my_assignment") in (None, {}) or d.get("my_assignment") is None
+        assert d.get("my_assignments") == []
 
 
 # ----------------------- PHASE 1 + 2 SMOKE -----------------------

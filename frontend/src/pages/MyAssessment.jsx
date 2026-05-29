@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -6,9 +6,11 @@ import { ClipboardCheck, CalendarCheck2, User, School, Clock, AlertCircle } from
 
 const STATUS_TONE = {
   "Belum Dimulai": "bg-slate-100 text-slate-700",
-  "Draft": "bg-amber-100 text-amber-800",
-  "Final": "bg-emerald-100 text-emerald-700",
+  Draft: "bg-amber-100 text-amber-800",
+  Final: "bg-emerald-100 text-emerald-700",
 };
+
+const ROLES = ["Kepala Sekolah", "Pengawas"];
 
 export default function MyAssessment() {
   const [data, setData] = useState(null);
@@ -18,12 +20,18 @@ export default function MyAssessment() {
     api.get("/assignments/me").then((r) => setData(r.data)).finally(() => setLoading(false));
   }, []);
 
+  const assignmentsByRole = useMemo(() => {
+    const out = {};
+    for (const item of data?.assignments || []) out[item.assessor_role] = item;
+    return out;
+  }, [data]);
+
   if (loading) return <div className="text-slate-500 text-sm">Memuat...</div>;
   const period = data?.active_period;
-  const assignment = (data?.assignments || [])[0];
+  const assignments = data?.assignments || [];
 
   return (
-    <div className="space-y-6 max-w-3xl" data-testid="my-assessment-page">
+    <div className="space-y-6 max-w-5xl" data-testid="my-assessment-page">
       <div>
         <div className="text-xs uppercase tracking-[0.2em] font-bold text-emerald-600 mb-1">Penilaian PJOK</div>
         <h1 className="font-heading text-3xl font-bold text-slate-900">Penilaian Saya</h1>
@@ -36,46 +44,67 @@ export default function MyAssessment() {
           <div className="text-slate-700 font-medium">Belum ada periode penilaian aktif</div>
           <div className="text-sm text-slate-500 mt-1">Tunggu Admin mengaktifkan periode untuk semester ini.</div>
         </Card>
-      ) : !assignment ? (
+      ) : assignments.length === 0 ? (
         <Card className="p-8 text-center border-dashed" data-testid="status-no-assignment">
           <ClipboardCheck className="w-10 h-10 text-slate-300 mx-auto mb-3" />
           <div className="text-slate-700 font-medium">Belum ada assignment penilaian</div>
           <div className="text-sm text-slate-500 mt-1">Anda belum ditunjuk dalam penilaian periode <span className="font-medium">{period.period_name}</span>.</div>
         </Card>
       ) : (
-        <Card className="p-6 relative overflow-hidden" data-testid="my-assessment-card">
-          <div className="absolute -right-12 -top-12 w-48 h-48 rounded-full bg-emerald-100 blur-2xl opacity-50" />
-          <div className="relative space-y-5">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <Badge className="bg-emerald-700 text-white hover:bg-emerald-700 border-0">
-                <CalendarCheck2 className="w-3 h-3 mr-1" /> {period.period_name}
-              </Badge>
-              <Badge className={`${STATUS_TONE[assignment.status] || "bg-slate-100"} hover:${STATUS_TONE[assignment.status]} border-0 px-3 py-1`} data-testid="my-assessment-status">
-                Status: {assignment.status}
-              </Badge>
-            </div>
-
-            <div className="pt-2 space-y-3">
-              <DetailRow icon={User} label="Penilai" value={`${assignment.assessor_name} (${assignment.assessor_role})`} />
-              <DetailRow icon={School} label="Sekolah" value={assignment.school_name || "-"} />
-              <DetailRow icon={Clock} label="Tanggal Observasi" value={assignment.observation_date || "Belum dijadwalkan"} />
-              <DetailRow icon={ClipboardCheck} label="Jenis Penilaian" value={assignment.assignment_type} />
-            </div>
-
-            {assignment.notes && (
-              <div className="rounded-lg bg-slate-50 border border-slate-200 px-4 py-3">
-                <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-1">Catatan Penilai</div>
-                <div className="text-sm text-slate-800">{assignment.notes}</div>
-              </div>
-            )}
-
-            <div className="text-[11px] text-slate-500 pt-2 border-t border-slate-100">
-              Input penilaian detail oleh penilai akan tersedia pada tahap berikutnya.
-            </div>
-          </div>
-        </Card>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {ROLES.map((role) => (
+            <AssessmentCard key={role} role={role} period={period} assignment={assignmentsByRole[role]} />
+          ))}
+        </div>
       )}
     </div>
+  );
+}
+
+function AssessmentCard({ role, period, assignment }) {
+  const title = role === "Pengawas" ? "Penilaian Pengawas" : "Penilaian Kepala Sekolah";
+  if (!assignment) {
+    return (
+      <Card className="p-6 border-dashed" data-testid={`my-assessment-${role.toLowerCase().replace(" ", "-")}-empty`}>
+        <Badge className="bg-slate-100 text-slate-700 border-0 mb-4">{title}</Badge>
+        <div className="text-slate-700 font-medium">Belum ada assignment</div>
+        <div className="text-sm text-slate-500 mt-1">Assignment {title.toLowerCase()} belum dibuat untuk periode {period.period_name}.</div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="p-6 relative overflow-hidden" data-testid={`my-assessment-${role.toLowerCase().replace(" ", "-")}-card`}>
+      <div className="relative space-y-5">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <Badge className="bg-emerald-700 text-white border-0">
+            <CalendarCheck2 className="w-3 h-3 mr-1" /> {period.period_name}
+          </Badge>
+          <Badge className={`${STATUS_TONE[assignment.status] || "bg-slate-100"} border-0 px-3 py-1`} data-testid="my-assessment-status">
+            Status: {assignment.status}
+          </Badge>
+        </div>
+
+        <div>
+          <div className="font-heading text-xl font-semibold text-slate-900">{title}</div>
+          <div className="text-sm text-slate-500 mt-1">{assignment.assignment_type}</div>
+        </div>
+
+        <div className="pt-2 space-y-3">
+          <DetailRow icon={User} label="Penilai" value={assignment.assessor_name || "-"} />
+          <DetailRow icon={School} label="Sekolah" value={assignment.school_name || "-"} />
+          <DetailRow icon={Clock} label="Tanggal Observasi" value={assignment.observation_date || "Belum dijadwalkan"} />
+          <DetailRow icon={ClipboardCheck} label="Jenis Penilaian" value={title} />
+        </div>
+
+        {assignment.notes && (
+          <div className="rounded-lg bg-slate-50 border border-slate-200 px-4 py-3">
+            <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-1">Catatan Penilai</div>
+            <div className="text-sm text-slate-800">{assignment.notes}</div>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 
