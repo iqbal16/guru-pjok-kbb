@@ -1003,6 +1003,15 @@ async def _validate_assignment(teacher_id, assessor_user_id, period_id, creator)
     if not period:
         raise HTTPException(status_code=400, detail="Belum ada periode penilaian aktif.")
 
+    # If creator is kepsek, check their school first (403)
+    if creator["role"] == "kepala_sekolah":
+        principal = await db.principals.find_one({"user_id": creator["id"]}, {"_id": 0})
+        if not principal and creator.get("linked_profile_id"):
+            principal = await db.principals.find_one({"id": creator["linked_profile_id"]}, {"_id": 0})
+        creator_school = (principal or {}).get("school_id")
+        if not creator_school or creator_school != teacher.get("school_id"):
+            raise HTTPException(status_code=403, detail="Anda hanya boleh membuat assignment untuk guru di sekolah Anda")
+
     # If assessor is kepsek, school must match
     if assessor.get("role") == "kepala_sekolah":
         principal = await db.principals.find_one({"user_id": assessor_user_id}, {"_id": 0})
@@ -1011,15 +1020,6 @@ async def _validate_assignment(teacher_id, assessor_user_id, period_id, creator)
         kepsek_school = (principal or {}).get("school_id")
         if not kepsek_school or kepsek_school != teacher.get("school_id"):
             raise HTTPException(status_code=400, detail="Kepala Sekolah hanya boleh menilai guru di sekolahnya sendiri")
-
-    # If creator is kepsek, restrict
-    if creator["role"] == "kepala_sekolah":
-        principal = await db.principals.find_one({"user_id": creator["id"]}, {"_id": 0})
-        if not principal and creator.get("linked_profile_id"):
-            principal = await db.principals.find_one({"id": creator["linked_profile_id"]}, {"_id": 0})
-        creator_school = (principal or {}).get("school_id")
-        if not creator_school or creator_school != teacher.get("school_id"):
-            raise HTTPException(status_code=403, detail="Anda hanya boleh membuat assignment untuk guru di sekolah Anda")
 
     return teacher, assessor, period
 

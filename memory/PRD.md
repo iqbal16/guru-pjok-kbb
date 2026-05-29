@@ -26,6 +26,28 @@ Aplikasi web full-stack untuk Penilaian Kinerja Guru Penjas/PJOK SD di wilayah K
 
 ## What's Been Implemented (28 Mei 2026)
 
+### Tahap 3 — Assignment Penilaian (28 Mei 2026)
+- **Schema baru**: `assessment_assignments` (id, teacher_id, school_id auto, assessor_user_id, assessor_role, assessment_period_id, observation_date, assignment_type default 'Penilaian Utama', status, notes, created_by, timestamps). Unique index `(teacher_id, assessment_period_id, assignment_type)`.
+- **Endpoints**: `GET/POST/PUT/DELETE /api/assignments`, `POST /api/assignments/{id}/start` (Belum Dimulai → Draft), `GET /api/assignments/me` untuk guru.
+- **Validasi**: 
+  - 1 guru hanya boleh 1 "Penilaian Utama" per periode → 400 "Guru ini sudah memiliki penilaian utama pada periode ini." ✓
+  - Tanpa periode aktif → 400 "Belum ada periode penilaian aktif." ✓
+  - Teacher harus aktif, assessor harus pengawas/kepsek aktif.
+  - Kepsek-as-creator: hanya guru di sekolahnya (403, dicek lebih dulu sebelum assessor-school check).
+  - Kepsek-as-assessor: school harus sama dengan school guru (400).
+- **RBAC**: admin all; pengawas only assessor==self; kepsek only school==own; guru only teacher==self.
+- **Dashboard expanded** per role: admin (5 + 5 assignment stats), pengawas (mine/belum/draft), kepsek (sudah/belum/draft), guru (my_assignment card dengan period+assessor+status+observation_date).
+- **Seed**: 2 assignments di periode aktif (Ahmad oleh Kepsek SDN Lembang 01, Dewi oleh Pengawas).
+- **Frontend baru**: 
+  - `Assignments.jsx` (role-aware page): admin lihat semua + CRUD; pengawas read-only + tombol "Mulai Penilaian" pada assignment-nya; kepsek tabel sekolah + create dengan assessor auto-locked ke dirinya.
+  - `MyAssessment.jsx` (guru): card status assignment di periode aktif (Belum Dimulai/Draft/Belum ada).
+  - Sidebar: "Assignment Penilaian" (admin) / "Penilaian Saya" (pengawas/kepsek/guru).
+- **Audit log**: create/update/delete/start tercatat otomatis.
+
+### Testing
+- Backend: **87/87 pass** (Phase 3 = 31 tests, Phase 1+2 regresi smoke = 56).
+- Frontend e2e: Playwright role-aware (admin/pengawas/kepsek/guru) — semua flow lulus.
+
 ### Tahap 2 — Periode Penilaian & Komponen Observasi PJOK (28 Mei 2026)
 - **Schema baru**: `academic_years`, `semesters`, `assessment_periods`, `observation_categories`, `observation_aspects` (UUID + ISO datetime).
 - **Endpoints**: full CRUD untuk 5 koleksi + `POST /api/assessment-periods/{id}/activate` + `GET /api/assessment-periods/active`. RBAC: admin full CRUD; pengawas/kepsek/guru hanya melihat data aktif. Aspek non-aktif disembunyikan dari non-admin.
