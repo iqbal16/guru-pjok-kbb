@@ -1,5 +1,7 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { useAuth, ROLE_LABELS } from "@/context/AuthContext";
+import api from "@/lib/api";
 import {
   LayoutDashboard,
   Users,
@@ -16,8 +18,15 @@ import {
   CalendarCheck2,
   Layers,
   ListChecks,
+  Lightbulb,
+  ClipboardPenLine,
   ClipboardList,
   ClipboardCheck,
+  FileText,
+  Menu,
+  X,
+  Bell,
+  History,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -47,15 +56,38 @@ const MENU = [
   { to: "/aspek-penilaian", label: "Aspek Penilaian", icon: ListChecks, roles: ["admin"], testid: "menu-aspek" },
   { section: "Penilaian", roles: ["admin", "pengawas", "kepala_sekolah", "guru"] },
   { to: "/assignments", label: "Assignment Penilaian", icon: ClipboardList, roles: ["admin"], testid: "menu-assignments" },
+  { to: "/evaluasi-rtl", label: "Manajemen Evaluasi & RTL", icon: ClipboardPenLine, roles: ["admin"], testid: "menu-evaluasi-rtl" },
   { to: "/assignments", label: "Penilaian Saya", icon: ClipboardCheck, roles: ["pengawas", "kepala_sekolah"], testid: "menu-penilaian-saya" },
   { to: "/penilaian-saya", label: "Penilaian Saya", icon: ClipboardCheck, roles: ["guru"], testid: "menu-penilaian-saya-guru" },
+  { to: "/reports", label: "Report Penilaian", icon: FileText, roles: ["admin", "pengawas", "kepala_sekolah", "guru"], testid: "menu-reports" },
+  { to: "/notifikasi", label: "Notifikasi", icon: Bell, roles: ["admin", "pengawas", "kepala_sekolah", "guru"], testid: "menu-notifikasi" },
+  { to: "/usulan-aspek-observasi", label: "Usulan Aspek Observasi", icon: Lightbulb, roles: ["guru"], testid: "menu-usulan-aspek" },
+  { to: "/review-usulan-aspek", label: "Review Usulan Aspek", icon: Lightbulb, roles: ["admin", "pengawas", "kepala_sekolah"], testid: "menu-review-usulan-aspek" },
   { section: "Sistem", roles: ["admin"] },
+  { to: "/audit-log", label: "Audit Log", icon: History, roles: ["admin"], testid: "menu-audit-log" },
   { to: "/permissions", label: "Pengaturan Hak Akses", icon: ShieldCheck, roles: ["admin"], testid: "menu-permissions" },
 ];
 
 export default function DashboardLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [unread, setUnread] = useState(0);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    let alive = true;
+    const loadUnread = async () => {
+      try {
+        const { data } = await api.get("/notifications/unread-count");
+        if (alive) setUnread(data.count || 0);
+      } catch (_) {}
+    };
+    loadUnread();
+    const timer = setInterval(loadUnread, 60000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [user]);
+
   if (!user) return null;
   const menus = MENU.filter((m) => m.roles.includes(user.role));
   const initials = (user.name || "U")
@@ -67,17 +99,38 @@ export default function DashboardLayout() {
 
   return (
     <div className="min-h-screen flex bg-slate-50">
+      {sidebarOpen && (
+        <button
+          type="button"
+          aria-label="Tutup menu"
+          className="fixed inset-0 z-30 bg-slate-950/50 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
       {/* Sidebar */}
-      <aside className="w-[260px] bg-emerald-950 text-emerald-50 fixed inset-y-0 left-0 flex flex-col" data-testid="sidebar">
+      <aside
+        className={`w-[260px] bg-emerald-950 text-emerald-50 fixed inset-y-0 left-0 z-40 flex flex-col transform transition-transform duration-200 lg:translate-x-0 ${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+        data-testid="sidebar"
+      >
         <div className="px-6 py-6 border-b border-emerald-900/60">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-orange-500 flex items-center justify-center">
               <Trophy className="w-5 h-5 text-white" strokeWidth={2.2} />
             </div>
             <div>
-              <div className="font-heading font-bold text-base leading-tight">PJOK KBB</div>
-              <div className="text-[11px] text-emerald-300/80 leading-tight">Penilaian Kinerja Guru</div>
+              <div className="font-heading font-bold text-base leading-tight">Penilaian Kinerja Guru PJOK SD KBB</div>
+              <div className="text-[11px] text-emerald-300/80 leading-tight">Kabupaten Bandung Barat</div>
             </div>
+            <button
+              type="button"
+              aria-label="Tutup menu"
+              className="ml-auto rounded-md p-2 text-emerald-100 hover:bg-emerald-900 lg:hidden"
+              onClick={() => setSidebarOpen(false)}
+            >
+              <X className="h-5 w-5" />
+            </button>
           </div>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
@@ -95,6 +148,7 @@ export default function DashboardLayout() {
                 to={m.to}
                 end={m.to === "/"}
                 data-testid={m.testid}
+                onClick={() => setSidebarOpen(false)}
                 className={({ isActive }) =>
                   `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
                     isActive
@@ -110,18 +164,43 @@ export default function DashboardLayout() {
           })}
         </nav>
         <div className="px-4 py-3 border-t border-emerald-900/60 text-[11px] text-emerald-300/70">
-          Kab. Bandung Barat • Jenjang SD
+          Kab. Bandung Barat - Jenjang SD
         </div>
       </aside>
 
       {/* Main */}
-      <div className="ml-[260px] flex-1 flex flex-col min-h-screen">
+      <div className="flex-1 flex flex-col min-h-screen lg:ml-[260px] min-w-0">
         {/* Topbar */}
-        <header className="h-[72px] bg-white border-b border-slate-200 px-8 flex items-center justify-between sticky top-0 z-20">
-          <div>
+        <header className="h-[72px] bg-white border-b border-slate-200 px-4 md:px-8 flex items-center justify-between sticky top-0 z-20">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              aria-label="Buka menu"
+              className="rounded-md border border-slate-200 p-2 text-slate-700 lg:hidden"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+            <div className="min-w-0">
             <div className="text-xs uppercase tracking-[0.2em] font-bold text-emerald-600">Dinas Pendidikan</div>
-            <div className="text-sm text-slate-500">Sistem Penilaian Kinerja Guru PJOK SD</div>
+            <div className="text-sm text-slate-500 truncate">Aplikasi Penilaian Kinerja Guru PJOK SD Kabupaten Bandung Barat</div>
+            </div>
           </div>
+          <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => navigate("/notifikasi")}
+            className="relative rounded-full border border-slate-200 p-2 text-slate-700 hover:bg-slate-50"
+            data-testid="notification-button"
+            aria-label="Buka notifikasi"
+          >
+            <Bell className="h-5 w-5" />
+            {unread > 0 && (
+              <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                {unread > 99 ? "99+" : unread}
+              </span>
+            )}
+          </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="flex items-center gap-3 group" data-testid="profile-dropdown-trigger">
@@ -152,9 +231,10 @@ export default function DashboardLayout() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          </div>
         </header>
 
-        <main className="flex-1 p-6 md:p-8" data-testid="main-content">
+        <main className="flex-1 p-4 md:p-8 min-w-0" data-testid="main-content">
           <Outlet />
         </main>
       </div>

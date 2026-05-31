@@ -58,7 +58,12 @@
   "scripts": {
     "start": "craco start",
     "build": "craco build",
-    "test": "craco test"
+    "test": "craco test",
+    "test:e2e": "playwright test -c playwright.config.ts",
+    "test:e2e:ui": "playwright test -c playwright.config.ts --ui",
+    "test:e2e:headed": "playwright test -c playwright.config.ts --headed",
+    "test:e2e:debug": "playwright test -c playwright.config.ts --debug",
+    "test:e2e:report": "playwright show-report ../playwright-report"
   },
   "browserslist": {
     "production": [
@@ -77,6 +82,7 @@
     "@craco/craco": "^7.1.0",
     "@emergentbase/visual-edits": "https://assets.emergent.sh/npm/emergentbase-visual-edits-1.0.8.tgz",
     "@eslint/js": "9.23.0",
+    "@playwright/test": "^1.53.0",
     "autoprefixer": "^10.4.20",
     "eslint": "9.23.0",
     "eslint-plugin-import": "2.31.0",

@@ -79,10 +79,10 @@ export default function Dashboard() {
             Dashboard {ROLE_LABELS[user.role]}
           </div>
           <h1 className="font-heading text-4xl font-bold tracking-tight text-slate-900">
-            Halo, {user.name.split(",")[0]}.
+            Aplikasi Penilaian Kinerja Guru PJOK SD Kabupaten Bandung Barat
           </h1>
           <p className="text-slate-600 mt-2">
-            Ringkasan sistem penilaian kinerja Guru PJOK SD Kabupaten Bandung Barat.
+            Halo, {user.name.split(",")[0]}. Berikut ringkasan sistem penilaian kinerja Guru PJOK SD Kabupaten Bandung Barat.
           </p>
         </div>
         <Badge className="bg-orange-100 text-orange-700 border-0 px-3 py-1.5" data-testid="active-period-badge">
@@ -101,7 +101,7 @@ export default function Dashboard() {
           </div>
 
           <div>
-            <h3 className="font-heading text-lg font-semibold text-slate-900 mb-3">Status Penilaian — Periode Aktif</h3>
+            <h3 className="font-heading text-lg font-semibold text-slate-900 mb-3">Status Penilaian - Periode Aktif</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
               <StatCard title="Assignment Kepala Sekolah" value={stats.total_assignment_kepala_sekolah || 0} icon={ClipboardList} tone="emerald" testid="stat-assignment-kepsek" />
               <StatCard title="Assignment Pengawas" value={stats.total_assignment_pengawas || 0} icon={ClipboardCheck} tone="blue" testid="stat-assignment-pengawas" />

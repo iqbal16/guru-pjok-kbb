@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Card } from "@/components/ui/card";
@@ -12,13 +13,27 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Search, Pencil, Trash2, Inbox, Play, ClipboardList, Eye, AlertCircle } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import FormErrorSummary from "@/components/FormErrorSummary";
+import { Plus, Search, Pencil, Trash2, Inbox, Play, ClipboardList, Eye, AlertCircle, RotateCcw, Send, MoreHorizontal, FileText, Download } from "lucide-react";
 import { toast } from "sonner";
 
 const STATUS_TONE = {
-  "Belum Dimulai": "bg-slate-100 text-slate-700",
-  "Draft": "bg-amber-100 text-amber-800",
-  "Final": "bg-emerald-100 text-emerald-700",
+  "Belum Dimulai": "bg-slate-100 text-slate-700 ring-slate-200",
+  Draft: "bg-amber-50 text-amber-800 ring-amber-200",
+  "Menunggu Review Guru": "bg-sky-50 text-sky-800 ring-sky-200",
+  "Feedback dari Guru": "bg-orange-50 text-orange-800 ring-orange-200",
+  "Draft Revisi": "bg-violet-50 text-violet-800 ring-violet-200",
+  Final: "bg-emerald-50 text-emerald-800 ring-emerald-200",
+};
+
+const STATUS_LABEL = {
+  "Belum Dimulai": "Belum Dimulai",
+  Draft: "Draft",
+  "Menunggu Review Guru": "Menunggu Review Guru",
+  "Feedback dari Guru": "Feedback dari Guru",
+  "Draft Revisi": "Draft Revisi",
+  Final: "Final",
 };
 
 const ROLE_LABEL = {
@@ -26,12 +41,27 @@ const ROLE_LABEL = {
   Pengawas: "Penilaian oleh Pengawas",
 };
 
+function getStatusLabel(status) {
+  return STATUS_LABEL[status] || status || "-";
+}
+
+function getStatusBadgeClass(status) {
+  return STATUS_TONE[status] || "bg-slate-100 text-slate-700 ring-slate-200";
+}
+
 function StatusBadge({ status }) {
-  return <Badge className={`${STATUS_TONE[status] || "bg-slate-100 text-slate-700"} border-0`}>{status}</Badge>;
+  return (
+    <Badge
+      className={`${getStatusBadgeClass(status)} h-7 min-w-[148px] justify-center rounded-full border-0 px-3 text-[11px] font-semibold leading-none ring-1 whitespace-nowrap`}
+    >
+      {getStatusLabel(status)}
+    </Badge>
+  );
 }
 
 export default function Assignments() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const isAdmin = user.role === "admin";
   const isPengawas = user.role === "pengawas";
   const isKepsek = user.role === "kepala_sekolah";
@@ -46,9 +76,14 @@ export default function Assignments() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [delTarget, setDelTarget] = useState(null);
+  const [unlockTarget, setUnlockTarget] = useState(null);
+  const [forceTarget, setForceTarget] = useState(null);
+  const [adminReason, setAdminReason] = useState("");
+  const [adminReasonError, setAdminReasonError] = useState("");
   const [detail, setDetail] = useState(null);
   const [selectedInfo, setSelectedInfo] = useState(null);
   const [optionLoading, setOptionLoading] = useState(false);
+  const [formError, setFormError] = useState(null);
   const [form, setForm] = useState({
     teacher_id: "",
     include_principal: false,
@@ -95,6 +130,7 @@ export default function Assignments() {
       principal_assessor_id: "",
       supervisor_assessor_id: "",
     }));
+    setFormError(null);
     setSelectedInfo(null);
     if (!teacherId) return;
     setOptionLoading(true);
@@ -136,6 +172,7 @@ export default function Assignments() {
       observation_date: "",
       notes: "",
     });
+    setFormError(null);
     setOpen(true);
   };
 
@@ -155,17 +192,17 @@ export default function Assignments() {
   };
 
   const validateCreate = () => {
-    if (!form.teacher_id) return "Pilih guru terlebih dahulu.";
-    if (!form.include_principal && !form.include_supervisor) return "Pilih minimal satu jenis penilaian.";
+    if (!form.teacher_id) return { field: "assignment-teacher-field", message: "Pilih guru terlebih dahulu." };
+    if (!form.include_principal && !form.include_supervisor) return { field: "assignment-role-field", message: "Pilih minimal satu jenis penilaian." };
     if (form.include_principal) {
-      if (selectedInfo?.existing_assignments?.["Kepala Sekolah"]) return "Guru ini sudah memiliki Penilaian oleh Kepala Sekolah pada periode aktif.";
-      if (!selectedInfo?.principal_assessor) return "Kepala Sekolah untuk sekolah guru ini belum ditemukan.";
+      if (selectedInfo?.existing_assignments?.["Kepala Sekolah"]) return { field: "assignment-role-field", message: "Guru ini sudah memiliki Penilaian oleh Kepala Sekolah pada periode aktif." };
+      if (!selectedInfo?.principal_assessor) return { field: "assignment-role-field", message: "Kepala Sekolah untuk sekolah guru ini belum ditemukan." };
     }
     if (form.include_supervisor) {
-      if (selectedInfo?.existing_assignments?.Pengawas) return "Guru ini sudah memiliki Penilaian oleh Pengawas pada periode aktif.";
-      if (!form.supervisor_assessor_id) return "Pengawas sesuai wilayah sekolah guru ini belum dipilih.";
+      if (selectedInfo?.existing_assignments?.Pengawas) return { field: "assignment-role-field", message: "Guru ini sudah memiliki Penilaian oleh Pengawas pada periode aktif." };
+      if (!form.supervisor_assessor_id) return { field: "assignment-role-field", message: "Pengawas sesuai wilayah sekolah guru ini belum dipilih." };
     }
-    return "";
+    return null;
   };
 
   const submit = async (e) => {
@@ -180,7 +217,9 @@ export default function Assignments() {
       } else {
         const err = validateCreate();
         if (err) {
-          toast.error(err);
+          setFormError(err);
+          toast.error(err.message);
+          setTimeout(() => document.getElementById(err.field)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
           return;
         }
         const payloadBase = {
@@ -216,6 +255,26 @@ export default function Assignments() {
     }
   };
 
+  const sendAssignment = async (a) => {
+    try {
+      const { data } = await api.post(`/assignments/${a.id}/send-to-teacher`);
+      toast.success(data.assignment?.status === "Final" ? "Penilaian otomatis menjadi Final" : "Penilaian dikirim ke Guru");
+      await load();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Gagal mengirim penilaian");
+    }
+  };
+
+  const startRevision = async (a) => {
+    try {
+      await api.post(`/assignments/${a.id}/start-revision`);
+      toast.success("Draft revisi dibuka");
+      await load();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Gagal memulai revisi");
+    }
+  };
+
   const confirmDelete = async () => {
     if (!delTarget) return;
     try {
@@ -225,6 +284,44 @@ export default function Assignments() {
       await load();
     } catch (e) {
       toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Gagal menghapus");
+    }
+  };
+
+  const submitEmergencyUnlock = async () => {
+    const reason = adminReason.trim();
+    if (!reason) {
+      setAdminReasonError("Alasan Emergency Unlock wajib diisi.");
+      setTimeout(() => document.getElementById("admin-reason-input")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+      return;
+    }
+    try {
+      await api.post(`/assignments/${unlockTarget.id}/emergency-unlock`, { reason });
+      toast.success("Assignment berhasil dibuka kembali");
+      setUnlockTarget(null);
+      setAdminReason("");
+      setAdminReasonError("");
+      await load();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Gagal melakukan Emergency Unlock");
+    }
+  };
+
+  const submitForceFinal = async () => {
+    const reason = adminReason.trim();
+    if (!reason) {
+      setAdminReasonError("Alasan Force Final wajib diisi.");
+      setTimeout(() => document.getElementById("admin-reason-input")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+      return;
+    }
+    try {
+      await api.post(`/assignments/${forceTarget.id}/force-final`, { reason });
+      toast.success("Assignment berhasil difinalisasi");
+      setForceTarget(null);
+      setAdminReason("");
+      setAdminReasonError("");
+      await load();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e?.response?.data?.detail) || "Gagal melakukan Force Final");
     }
   };
 
@@ -272,18 +369,22 @@ export default function Assignments() {
         </Card>
       )}
 
-      <Card className="p-6">
+      <Card className="p-4 sm:p-6">
         <div className="flex items-center gap-3 mb-4 flex-wrap">
           <div className="relative flex-1 min-w-[200px]">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <Input placeholder="Cari guru, NIP, sekolah, penilai..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" data-testid="assignments-search" />
           </div>
           <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-[200px]" data-testid="assignments-filter-status"><SelectValue placeholder="Filter Status" /></SelectTrigger>
+            <SelectTrigger className="w-full sm:w-[220px]" data-testid="assignments-filter-status"><SelectValue placeholder="Filter Status" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="semua">Semua Status</SelectItem>
               <SelectItem value="Belum Dimulai">Belum Dimulai</SelectItem>
               <SelectItem value="Draft">Draft</SelectItem>
+              <SelectItem value="Menunggu Review Guru">Menunggu Review Guru</SelectItem>
+              <SelectItem value="Feedback dari Guru">Feedback dari Guru</SelectItem>
+              <SelectItem value="Draft Revisi">Draft Revisi</SelectItem>
+              <SelectItem value="Final">Final</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -296,55 +397,103 @@ export default function Assignments() {
               {canCreate && active && <div className="text-sm text-slate-500 mt-1">Tambahkan penugasan baru untuk memulai.</div>}
             </div>
           ) : (
-            <div className="border rounded-lg overflow-x-auto">
+            <div className="rounded-lg border border-slate-200 overflow-x-auto">
               <Table>
                 <TableHeader className="bg-slate-50">
                   <TableRow>
-                    <TableHead>Guru</TableHead>
-                    <TableHead>NIP</TableHead>
-                    <TableHead>Sekolah</TableHead>
-                    <TableHead>Periode Aktif</TableHead>
-                    <TableHead>Penilai Kepala Sekolah</TableHead>
-                    <TableHead>Penilai Pengawas</TableHead>
-                    <TableHead>Tgl Observasi</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Aksi</TableHead>
+                    <TableHead className="min-w-[190px]">Guru</TableHead>
+                    <TableHead className="min-w-[130px]">NIP</TableHead>
+                    <TableHead className="min-w-[220px]">Sekolah</TableHead>
+                    <TableHead className="min-w-[190px]">Penilai</TableHead>
+                    <TableHead className="min-w-[180px]">Role Penilai</TableHead>
+                    <TableHead className="min-w-[160px]">Periode</TableHead>
+                    <TableHead className="min-w-[140px]">Tgl Observasi</TableHead>
+                    <TableHead className="min-w-[180px] text-center">Status</TableHead>
+                    <TableHead className="min-w-[250px] text-right">Aksi</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filtered.map((a) => {
-                    const canStart = a.assessor_user_id === user.id && a.status === "Belum Dimulai";
-                    const canEdit = isAdmin;
+                    const canAssess = isAdmin || a.assessor_user_id === user.id;
+                    const canStart = canAssess && a.status === "Belum Dimulai";
+                    const canEdit = isAdmin && a.status !== "Final";
+                    const canViewReadOnly = isKepsek && !canAssess && a.status !== "Belum Dimulai";
+                    const canOpenAssessment = a.status !== "Belum Dimulai" && (canAssess || canViewReadOnly);
+                    const canSend = ["Draft", "Draft Revisi"].includes(a.status) && canAssess;
+                    const canStartRevision = a.status === "Feedback dari Guru" && canAssess;
+                    const canViewReport = a.status !== "Belum Dimulai";
+                    const canOpenExport = a.status === "Final";
+                    const canEmergencyUnlock = isAdmin && a.status === "Final";
+                    const canForceFinal = isAdmin && a.status !== "Final";
+                    const openLabel = canViewReadOnly ? "Lihat Hasil" : (a.status === "Feedback dari Guru" ? "Buka Feedback" : (["Menunggu Review Guru", "Final"].includes(a.status) ? "Lihat Hasil" : "Lanjutkan Penilaian"));
+                    const sendLabel = a.status === "Draft Revisi" ? "Kirim Revisi" : "Kirim ke Guru";
                     return (
                       <TableRow key={a.id} data-testid={`assignment-row-${a.id}`}>
-                        <TableCell className="font-medium">{a.teacher_name || "-"}</TableCell>
+                        <TableCell className="font-medium text-slate-900">{a.teacher_name || "-"}</TableCell>
                         <TableCell className="font-mono text-xs text-slate-600">{a.teacher_nip || "-"}</TableCell>
                         <TableCell className="text-slate-600">{a.school_name || "-"}</TableCell>
-                        <TableCell className="text-slate-600">{a.period_name || active?.period_name || "-"}</TableCell>
-                        <TableCell>{a.assessor_role === "Kepala Sekolah" ? a.assessor_name : "-"}</TableCell>
-                        <TableCell>{a.assessor_role === "Pengawas" ? a.assessor_name : "-"}</TableCell>
-                        <TableCell className="text-slate-600 text-sm">{a.observation_date || "-"}</TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <Badge variant="outline" className="text-xs">{ROLE_LABEL[a.assessor_role] || a.assessor_role}</Badge>
-                            <StatusBadge status={a.status} />
+                        <TableCell className="max-w-[220px]">
+                          <div className="truncate" title={a.assessor_name || ""}>
+                            {a.assessor_name || "-"}
                           </div>
                         </TableCell>
-                        <TableCell className="text-right whitespace-nowrap">
-                          <Button size="sm" variant="ghost" onClick={() => setDetail(a)} data-testid={`detail-${a.id}`}>
-                            <Eye className="w-4 h-4" />
-                          </Button>
-                          {canStart && (
-                            <Button size="sm" variant="outline" onClick={() => startAssignment(a)} className="ml-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50" data-testid={`start-${a.id}`}>
-                              <Play className="w-3.5 h-3.5 mr-1" /> Mulai Penilaian
+                        <TableCell>
+                          <Badge variant="outline" className="rounded-full px-3 py-1 text-[11px] font-semibold whitespace-nowrap">
+                            {a.assessor_role || "-"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-slate-600">{a.period_name || active?.period_name || "-"}</TableCell>
+                        <TableCell className="text-slate-600 text-sm whitespace-nowrap">{a.observation_date || "-"}</TableCell>
+                        <TableCell className="text-center">
+                          <div className="space-y-1">
+                            <StatusBadge status={a.status} />
+                            {a.emergency_unlocked && (
+                              <Badge className="bg-amber-50 text-amber-800 ring-1 ring-amber-200 border-0 text-[10px]">Pernah di-unlock</Badge>
+                            )}
+                            {a.force_final && (
+                              <Badge className="bg-red-50 text-red-700 ring-1 ring-red-200 border-0 text-[10px]">Force Final</Badge>
+                            )}
+                            {a.signatures_need_update && (
+                              <Badge className="bg-orange-50 text-orange-700 ring-1 ring-orange-200 border-0 text-[10px]">TTD perlu update</Badge>
+                            )}
+                            <div className="text-[11px] text-slate-500">Feedback Guru: {a.feedback_count || 0}/2</div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-2 whitespace-nowrap">
+                            <Button size="sm" variant="outline" onClick={() => setDetail(a)} data-testid={`detail-${a.id}`} className="h-8 border-slate-200 text-slate-700 hover:bg-slate-50">
+                              <Eye className="w-3.5 h-3.5 mr-1" /> Detail
                             </Button>
-                          )}
-                          {canEdit && (
-                            <>
-                              <Button size="sm" variant="ghost" onClick={() => openEdit(a)} data-testid={`edit-${a.id}`}><Pencil className="w-4 h-4" /></Button>
-                              <Button size="sm" variant="ghost" onClick={() => setDelTarget(a)} className="text-red-600 hover:text-red-700" data-testid={`delete-${a.id}`}><Trash2 className="w-4 h-4" /></Button>
-                            </>
-                          )}
+                            {canStart ? (
+                              <Button size="sm" onClick={() => startAssignment(a)} className="h-8 bg-emerald-700 hover:bg-emerald-800" data-testid={`start-${a.id}`}>
+                                <Play className="w-3.5 h-3.5 mr-1" /> Mulai
+                              </Button>
+                            ) : canOpenAssessment ? (
+                              <Button size="sm" onClick={() => navigate(`/assignments/${a.id}/penilaian`)} className="h-8 bg-amber-600 hover:bg-amber-700" data-testid={`fill-${a.id}`}>
+                                <ClipboardList className="w-3.5 h-3.5 mr-1" /> {openLabel}
+                              </Button>
+                            ) : null}
+                            <AssignmentActionMenu
+                              assignment={a}
+                              canSend={canSend}
+                              canStartRevision={canStartRevision}
+                              canEdit={canEdit}
+                              canViewReport={canViewReport}
+                              canOpenExport={canOpenExport}
+                              canEmergencyUnlock={canEmergencyUnlock}
+                              canForceFinal={canForceFinal}
+                              sendLabel={sendLabel}
+                              onDetail={() => setDetail(a)}
+                              onSend={() => sendAssignment(a)}
+                              onStartRevision={() => startRevision(a)}
+                              onEdit={() => openEdit(a)}
+                              onDelete={() => setDelTarget(a)}
+                              onReport={() => navigate("/reports")}
+                              onExport={() => navigate("/reports")}
+                              onEmergencyUnlock={() => { setUnlockTarget(a); setAdminReason(""); setAdminReasonError(""); }}
+                              onForceFinal={() => { setForceTarget(a); setAdminReason(""); setAdminReasonError(""); }}
+                            />
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -371,10 +520,12 @@ export default function Assignments() {
               </Card>
             ) : (
               <>
-                <div className="space-y-2">
+                <FormErrorSummary errors={formError ? [formError] : []} />
+
+                <div id="assignment-teacher-field" className="space-y-2">
                   <Label>Guru yang Dinilai</Label>
                   <Select value={form.teacher_id} onValueChange={chooseTeacher}>
-                    <SelectTrigger data-testid="assignment-teacher-select"><SelectValue placeholder="Pilih guru" /></SelectTrigger>
+                    <SelectTrigger data-testid="assignment-teacher-select" className={formError?.field === "assignment-teacher-field" ? "border-red-400 ring-red-100" : ""}><SelectValue placeholder="Pilih guru" /></SelectTrigger>
                     <SelectContent>
                       {teacherOptions.map((t) => (
                         <SelectItem key={t.id} value={t.id}>{t.name} {t.nip ? `(${t.nip})` : ""}</SelectItem>
@@ -394,7 +545,7 @@ export default function Assignments() {
                       <Info label="Wilayah" value={selectedInfo.school?.subdistrict || "-"} />
                     </div>
 
-                    <div className="space-y-3 pt-2 border-t border-slate-200">
+                    <div id="assignment-role-field" className={`space-y-3 pt-2 border-t border-slate-200 ${formError?.field === "assignment-role-field" ? "rounded-lg border border-red-200 bg-red-50/40 p-3" : ""}`}>
                       <RoleOption
                         checked={form.include_principal}
                         disabled={!selectedInfo.principal_assessor || !!existingPrincipal}
@@ -475,6 +626,8 @@ export default function Assignments() {
               <Row label="Jenis" value={ROLE_LABEL[detail.assessor_role] || detail.assignment_type} />
               <Row label="Tanggal Observasi" value={detail.observation_date || "Belum diatur"} />
               <Row label="Status" value={<StatusBadge status={detail.status} />} />
+              <Row label="Feedback Guru" value={`${detail.feedback_count || 0} dari 2`} />
+              <Row label="Skor Tersimpan" value={detail.score_count || 0} />
               <Row label="Catatan" value={detail.notes || "-"} />
             </div>
           )}
@@ -495,6 +648,34 @@ export default function Assignments() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AdminReasonDialog
+        open={!!unlockTarget}
+        title="Emergency Unlock"
+        description="Tindakan ini akan membuka kembali penilaian final dan tercatat di audit log."
+        target={unlockTarget}
+        reason={adminReason}
+        error={adminReasonError}
+        onReasonChange={(v) => { setAdminReason(v); setAdminReasonError(""); }}
+        onCancel={() => { setUnlockTarget(null); setAdminReason(""); setAdminReasonError(""); }}
+        onConfirm={submitEmergencyUnlock}
+        confirmLabel="Emergency Unlock"
+        tone="warning"
+      />
+
+      <AdminReasonDialog
+        open={!!forceTarget}
+        title="Force Final"
+        description="Tindakan ini akan memfinalisasi penilaian dan mengunci data."
+        target={forceTarget}
+        reason={adminReason}
+        error={adminReasonError}
+        onReasonChange={(v) => { setAdminReason(v); setAdminReasonError(""); }}
+        onCancel={() => { setForceTarget(null); setAdminReason(""); setAdminReasonError(""); }}
+        onConfirm={submitForceFinal}
+        confirmLabel="Force Final"
+        tone="danger"
+      />
     </div>
   );
 }
@@ -505,6 +686,126 @@ function Info({ label, value }) {
       <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">{label}</div>
       <div className="text-slate-900 font-medium">{value || "-"}</div>
     </div>
+  );
+}
+
+function AssignmentActionMenu({
+  assignment,
+  canSend,
+  canStartRevision,
+  canEdit,
+  canViewReport,
+  canOpenExport,
+  canEmergencyUnlock,
+  canForceFinal,
+  sendLabel,
+  onDetail,
+  onSend,
+  onStartRevision,
+  onEdit,
+  onDelete,
+  onReport,
+  onExport,
+  onEmergencyUnlock,
+  onForceFinal,
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 border-slate-200 px-2 text-slate-700 hover:bg-slate-50"
+          data-testid={`assignment-actions-${assignment.id}`}
+        >
+          <MoreHorizontal className="w-4 h-4" />
+          <span className="sr-only">Aksi lainnya</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuItem onClick={onDetail}>
+          <Eye className="w-4 h-4" /> Lihat Detail
+        </DropdownMenuItem>
+        {canViewReport && (
+          <DropdownMenuItem onClick={onReport}>
+            <FileText className="w-4 h-4" /> Lihat Report
+          </DropdownMenuItem>
+        )}
+        {canOpenExport && (
+          <DropdownMenuItem onClick={onExport}>
+            <Download className="w-4 h-4" /> Export PDF
+          </DropdownMenuItem>
+        )}
+        {(canSend || canStartRevision || canEdit || canEmergencyUnlock || canForceFinal) && <DropdownMenuSeparator />}
+        {canStartRevision && (
+          <DropdownMenuItem onClick={onStartRevision}>
+            <RotateCcw className="w-4 h-4" /> Mulai Revisi
+          </DropdownMenuItem>
+        )}
+        {canSend && (
+          <DropdownMenuItem onClick={onSend}>
+            <Send className="w-4 h-4" /> {sendLabel}
+          </DropdownMenuItem>
+        )}
+        {canEdit && (
+          <DropdownMenuItem onClick={onEdit}>
+            <Pencil className="w-4 h-4" /> Edit
+          </DropdownMenuItem>
+        )}
+        {canEdit && (
+          <DropdownMenuItem onClick={onDelete} className="text-red-600 focus:text-red-700">
+            <Trash2 className="w-4 h-4" /> Hapus
+          </DropdownMenuItem>
+        )}
+        {canEmergencyUnlock && (
+          <DropdownMenuItem onClick={onEmergencyUnlock} className="text-amber-700 focus:text-amber-800">
+            <RotateCcw className="w-4 h-4" /> Emergency Unlock
+          </DropdownMenuItem>
+        )}
+        {canForceFinal && (
+          <DropdownMenuItem onClick={onForceFinal} className="text-red-600 focus:text-red-700">
+            <Send className="w-4 h-4" /> Force Final
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function AdminReasonDialog({ open, title, description, target, reason, error, onReasonChange, onCancel, onConfirm, confirmLabel, tone }) {
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className={`rounded-lg border p-3 text-sm ${tone === "danger" ? "border-red-200 bg-red-50 text-red-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+            Assignment: <span className="font-semibold">{target?.teacher_name || "-"}</span>. Aksi ini hanya boleh dilakukan Admin.
+          </div>
+          <FormErrorSummary errors={error ? [{ field: "admin-reason-input", message: error }] : []} />
+          <div className="space-y-2">
+            <Label className={error ? "text-red-700" : ""}>Alasan</Label>
+            <Textarea
+              id="admin-reason-input"
+              value={reason}
+              onChange={(e) => onReasonChange(e.target.value)}
+              rows={4}
+              className={error ? "border-red-400 focus-visible:ring-red-500" : ""}
+              placeholder="Tuliskan alasan administrasi secara jelas"
+            />
+            {error && <div className="text-sm text-red-600">{error}</div>}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onCancel}>Batal</Button>
+          <Button type="button" onClick={onConfirm} className={tone === "danger" ? "bg-red-600 hover:bg-red-700" : "bg-amber-600 hover:bg-amber-700"}>
+            {confirmLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

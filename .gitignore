@@ -18,6 +18,12 @@ node_modules/
 
 # Testing
 /coverage
+.env.test
+test-results/
+playwright-report/
+traces/
+videos/
+screenshots/
 
 # Next.js
 /.next/
@@ -83,6 +89,11 @@ android-sdk/
 .env
 .env.*
 *.env
+!.env.example
+!backend/.env.example
+!frontend/.env.example
+!.env.test.example
+!frontend/.env.test.example
 credentials.json
 *.key
 .credentials

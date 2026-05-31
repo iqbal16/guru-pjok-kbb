@@ -106,12 +106,47 @@ async def audit(user_id: Optional[str], action: str, table: str, record_id: Opti
         "created_at": now_iso(),
     })
 
+async def notify_user(user_id: Optional[str], title: str, message: str, type_: str = "info", related_module: str = "", related_record_id: Optional[str] = None):
+    if not user_id:
+        return
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "title": title,
+        "message": message,
+        "type": type_,
+        "related_module": related_module,
+        "related_record_id": related_record_id,
+        "is_read": False,
+        "created_at": now_iso(),
+        "read_at": None,
+    })
+
+async def notify_admins(title: str, message: str, type_: str = "info", related_module: str = "", related_record_id: Optional[str] = None):
+    admins = await db.users.find({"role": "admin", "status": "aktif"}, {"_id": 0, "id": 1}).to_list(200)
+    for admin in admins:
+        await notify_user(admin["id"], title, message, type_, related_module, related_record_id)
+
 def clean(d: dict) -> dict:
     if d is None:
         return d
     d.pop("_id", None)
     d.pop("password_hash", None)
     return d
+
+def json_safe(value):
+    if isinstance(value, list):
+        return [json_safe(item) for item in value]
+    if isinstance(value, dict):
+        return {str(k): json_safe(v) for k, v in value.items() if k != "_id"}
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+def normalize_employment_status(value: Optional[str]) -> str:
+    return "PNS" if value == "PNS" else "Non PNS"
 
 PROFILE_COLLECTIONS = {
     "guru": "teachers",
@@ -210,7 +245,7 @@ class TeacherIn(BaseModel):
     nip: str = ""
     subject: str = "PJOK"
     grade_level: str = "SD"
-    employment_status: str = "PNS"
+    employment_status: Literal["PNS", "Non PNS"] = "PNS"
     status: str = "aktif"
 
 class SupervisorIn(BaseModel):
@@ -488,11 +523,14 @@ async def list_teachers(user=Depends(get_current_user)):
         items = await db.teachers.find({"school_id": school_id}, {"_id": 0}).to_list(2000) if school_id else []
     else:  # guru
         items = await db.teachers.find({"user_id": user["id"]}, {"_id": 0}).to_list(2000)
+    for item in items:
+        item["employment_status"] = normalize_employment_status(item.get("employment_status"))
     return items
 
 @api.post("/teachers")
 async def create_teacher(body: TeacherIn, user=Depends(require_roles("admin"))):
     doc = body.model_dump()
+    doc["employment_status"] = normalize_employment_status(doc.get("employment_status"))
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = now_iso()
     doc["updated_at"] = now_iso()
@@ -509,6 +547,7 @@ async def update_teacher(tid: str, body: TeacherIn, user=Depends(require_roles("
     if not existing:
         raise HTTPException(status_code=404, detail="Guru tidak ditemukan")
     upd = body.model_dump()
+    upd["employment_status"] = normalize_employment_status(upd.get("employment_status"))
     upd["updated_at"] = now_iso()
     await db.teachers.update_one({"id": tid}, {"$set": upd})
     if upd.get("user_id"):
@@ -955,7 +994,11 @@ async def delete_aspect(aid: str, user=Depends(require_roles("admin"))):
 # PHASE 3 — Assignment Penilaian
 # =============================================================================
 
-ASSIGNMENT_FINAL = {"Final", "Selesai"}  # reserved for later phases
+ASSIGNMENT_FINAL = {"Final", "Selesai"}
+EDITABLE_SCORE_STATUSES = {"Draft", "Draft Revisi"}
+REVIEW_VISIBLE_STATUSES = {"Menunggu Review Guru", "Feedback dari Guru", "Draft Revisi", "Final"}
+REVIEW_COMPLETE_STATUSES = {"Disetujui Guru", "Feedback Maksimal Diproses", "Selesai"}
+REVIEW_BEFORE_FINAL_MESSAGE = "Penilaian harus dikirim dan disetujui oleh Guru terlebih dahulu sebelum RTL dapat difinalisasi."
 
 class AssignmentCreate(BaseModel):
     teacher_id: str
@@ -971,6 +1014,54 @@ class AssignmentUpdate(BaseModel):
     observation_date: Optional[str] = None
     notes: Optional[str] = None
     assignment_type: Optional[str] = None
+
+class AssessmentScoreIn(BaseModel):
+    aspect_id: str
+    score: int = Field(..., ge=1, le=4)
+    notes: Optional[str] = ""
+
+class AssessmentScoresSave(BaseModel):
+    scores: List[AssessmentScoreIn] = []
+
+class TeacherFeedbackIn(BaseModel):
+    feedback_text: str
+
+class AdminReasonIn(BaseModel):
+    reason: str
+    notes: Optional[str] = ""
+
+class EvaluationFollowupIn(BaseModel):
+    kesimpulan_hasil_observasi: Optional[str] = ""
+    aspek_kelebihan: Optional[str] = ""
+    aspek_perlu_perbaikan: Optional[str] = ""
+    penyebab_kendala: Optional[str] = ""
+    rekomendasi_umum: Optional[str] = ""
+    kegiatan_pembinaan: Optional[str] = ""
+    sasaran_target: Optional[str] = ""
+    waktu_pelaksanaan: Optional[str] = ""
+    keterangan: Optional[str] = ""
+    status_rtl: Literal["Belum Dimulai", "Dalam Proses", "Selesai"] = "Belum Dimulai"
+
+class DigitalSignatureIn(BaseModel):
+    signature_image: str
+
+class ProposedAspectCreate(BaseModel):
+    category_id: str
+    aspect_name: str
+    aspect_description: Optional[str] = ""
+    reason: Optional[str] = ""
+    assignment_id: Optional[str] = None
+
+class ProposedAspectUpdate(BaseModel):
+    category_id: Optional[str] = None
+    aspect_name: Optional[str] = None
+    aspect_description: Optional[str] = None
+    reason: Optional[str] = None
+    assignment_id: Optional[str] = None
+
+class ProposedAspectReview(BaseModel):
+    status: Literal["Approved", "Rejected"]
+    review_notes: Optional[str] = ""
 
 async def _get_active_period():
     return await db.assessment_periods.find_one({"is_active": True}, {"_id": 0})
@@ -1016,6 +1107,7 @@ async def _supervisor_assessors_for_school(school: Optional[dict]):
 async def _enrich_assignments(items):
     if not items:
         return items
+    a_ids = {x.get("id") for x in items}
     t_ids = {x.get("teacher_id") for x in items}
     s_ids = {x.get("school_id") for x in items}
     u_ids = {x.get("assessor_user_id") for x in items}
@@ -1024,6 +1116,20 @@ async def _enrich_assignments(items):
     schools = {s["id"]: s async for s in db.schools.find({"id": {"$in": list(s_ids)}}, {"_id": 0})}
     users = {u["id"]: u async for u in db.users.find({"id": {"$in": list(u_ids)}}, {"_id": 0, "password_hash": 0})}
     periods = {p["id"]: p async for p in db.assessment_periods.find({"id": {"$in": list(p_ids)}}, {"_id": 0})}
+    score_counts = {}
+    pipeline = [
+        {"$match": {"assignment_id": {"$in": list(a_ids)}}},
+        {"$group": {"_id": "$assignment_id", "count": {"$sum": 1}}},
+    ]
+    async for row in db.assessment_scores.aggregate(pipeline):
+        score_counts[row["_id"]] = row["count"]
+    active_aspects = await db.observation_aspects.find({"status": "aktif"}, {"_id": 0, "id": 1}).to_list(2000)
+    active_aspect_ids = {a["id"] for a in active_aspects}
+    max_score = len(active_aspect_ids) * 4
+    score_totals = {aid: 0 for aid in a_ids}
+    async for score in db.assessment_scores.find({"assignment_id": {"$in": list(a_ids)}}, {"_id": 0}):
+        if score.get("aspect_id") in active_aspect_ids and isinstance(score.get("score"), int):
+            score_totals[score.get("assignment_id")] = score_totals.get(score.get("assignment_id"), 0) + score["score"]
     for it in items:
         t = teachers.get(it.get("teacher_id"))
         s = schools.get(it.get("school_id"))
@@ -1035,6 +1141,9 @@ async def _enrich_assignments(items):
         it["assessor_name"] = (u or {}).get("name")
         it["period_name"] = (p or {}).get("period_name")
         it["period_is_active"] = (p or {}).get("is_active", False)
+        it["feedback_count"] = int(it.get("feedback_count") or 0)
+        it["score_count"] = score_counts.get(it.get("id"), 0)
+        it["final_percentage"] = round((score_totals.get(it.get("id"), 0) / max_score) * 100, 2) if max_score else 0
     return items
 
 async def _validate_assignment(teacher_id, assessor_user_id, period_id, creator):
@@ -1106,6 +1215,637 @@ async def _scope_for_role(user):
     tid = (teacher or {}).get("id")
     return {"teacher_id": tid} if tid else {"teacher_id": "__none__"}
 
+def _normalize_aspect_name(name: str) -> str:
+    return " ".join((name or "").strip().lower().split())
+
+async def _teacher_for_user(user: dict):
+    teacher = await db.teachers.find_one({"user_id": user["id"]}, {"_id": 0})
+    if not teacher and user.get("linked_profile_id"):
+        teacher = await db.teachers.find_one({"id": user["linked_profile_id"]}, {"_id": 0})
+    return teacher
+
+async def _teacher_user_id(teacher_id: Optional[str]) -> Optional[str]:
+    teacher = await db.teachers.find_one({"id": teacher_id}, {"_id": 0}) if teacher_id else None
+    return (teacher or {}).get("user_id")
+
+async def _assert_force_final_ready(aid: str, assignment: dict):
+    completion = await _official_score_completion(aid)
+    if completion["required"] < 1 or completion["missing"] > 0:
+        raise HTTPException(status_code=400, detail="Force Final ditolak: semua aspek resmi wajib diberi skor.")
+    await _assert_evaluation_complete_for_final(aid)
+    await _assert_signature(aid, assignment["assessor_user_id"])
+    teacher_user_id = await _teacher_user_id(assignment.get("teacher_id"))
+    if teacher_user_id:
+        await _assert_signature(aid, teacher_user_id, "guru")
+    return True
+
+def _assignment_review_complete(assignment: dict) -> bool:
+    return bool(assignment.get("teacher_review_completed")) or assignment.get("teacher_review_status") in REVIEW_COMPLETE_STATUSES
+
+async def _assert_review_complete_for_final(assignment: dict):
+    if not _assignment_review_complete(assignment):
+        raise HTTPException(status_code=400, detail=REVIEW_BEFORE_FINAL_MESSAGE)
+    return True
+
+async def _active_proposal_assignment_for_teacher(teacher_id: str, period_id: str, assignment_id: Optional[str] = None):
+    query = {
+        "teacher_id": teacher_id,
+        "assessment_period_id": period_id,
+        "status": {"$nin": list(ASSIGNMENT_FINAL)},
+    }
+    if assignment_id:
+        query["id"] = assignment_id
+    assignments = await db.assessment_assignments.find(query, {"_id": 0}).sort("created_at", 1).to_list(20)
+    if not assignments:
+        raise HTTPException(status_code=400, detail="Guru belum memiliki assignment aktif yang dapat menerima usulan aspek")
+    drafts = [a for a in assignments if a.get("status") == "Draft"]
+    return (drafts or assignments)[0], assignments
+
+async def _review_scope_for_proposals(user: dict):
+    if user["role"] == "admin":
+        return {}
+    if user["role"] == "kepala_sekolah":
+        principal = await db.principals.find_one({"user_id": user["id"]}, {"_id": 0})
+        if not principal and user.get("linked_profile_id"):
+            principal = await db.principals.find_one({"id": user["linked_profile_id"]}, {"_id": 0})
+        school_id = (principal or {}).get("school_id")
+        return {"school_id": school_id} if school_id else {"school_id": "__none__"}
+    if user["role"] == "pengawas":
+        assignment_ids = await db.assessment_assignments.distinct("id", {"assessor_user_id": user["id"]})
+        return {"assignment_id": {"$in": assignment_ids or ["__none__"]}}
+    raise HTTPException(status_code=403, detail="Role Anda tidak berhak mereview usulan aspek")
+
+async def _assert_can_review_proposal(proposal: dict, user: dict):
+    scope = await _review_scope_for_proposals(user)
+    if not scope:
+        return
+    if "school_id" in scope and proposal.get("school_id") != scope["school_id"]:
+        raise HTTPException(status_code=403, detail="Anda hanya boleh mereview usulan dari sekolah Anda")
+    if "assignment_id" in scope and proposal.get("assignment_id") not in scope["assignment_id"].get("$in", []):
+        raise HTTPException(status_code=403, detail="Anda hanya boleh mereview usulan dari assignment yang diberikan kepada Anda")
+
+async def _enrich_proposed_aspects(items):
+    if not items:
+        return items
+    t_ids = {x.get("teacher_id") for x in items}
+    s_ids = {x.get("school_id") for x in items}
+    p_ids = {x.get("assessment_period_id") for x in items}
+    c_ids = {x.get("category_id") for x in items}
+    a_ids = {x.get("assignment_id") for x in items}
+    r_ids = {x.get("reviewed_by") for x in items if x.get("reviewed_by")}
+    teachers = {t["id"]: t async for t in db.teachers.find({"id": {"$in": list(t_ids)}}, {"_id": 0})}
+    schools = {s["id"]: s async for s in db.schools.find({"id": {"$in": list(s_ids)}}, {"_id": 0})}
+    periods = {p["id"]: p async for p in db.assessment_periods.find({"id": {"$in": list(p_ids)}}, {"_id": 0})}
+    categories = {c["id"]: c async for c in db.observation_categories.find({"id": {"$in": list(c_ids)}}, {"_id": 0})}
+    assignments = {a["id"]: a async for a in db.assessment_assignments.find({"id": {"$in": list(a_ids)}}, {"_id": 0})}
+    reviewers = {u["id"]: u async for u in db.users.find({"id": {"$in": list(r_ids)}}, {"_id": 0, "password_hash": 0})} if r_ids else {}
+    for it in items:
+        teacher = teachers.get(it.get("teacher_id"), {})
+        school = schools.get(it.get("school_id"), {})
+        period = periods.get(it.get("assessment_period_id"), {})
+        category = categories.get(it.get("category_id"), {})
+        assignment = assignments.get(it.get("assignment_id"), {})
+        reviewer = reviewers.get(it.get("reviewed_by"), {})
+        it["teacher_name"] = teacher.get("name")
+        it["teacher_nip"] = teacher.get("nip")
+        it["school_name"] = school.get("school_name")
+        it["period_name"] = period.get("period_name")
+        it["category_name"] = category.get("category_name")
+        it["assignment_status"] = assignment.get("status")
+        it["assignment_assessor_role"] = assignment.get("assessor_role")
+        it["reviewer_name"] = reviewer.get("name")
+    return items
+
+async def _assignment_for_assessment_form(aid: str, user: dict, require_draft: bool = True):
+    assignment = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment tidak ditemukan")
+    if user["role"] == "guru":
+        raise HTTPException(status_code=403, detail="Guru tidak dapat mengisi form penilaian")
+    if require_draft and assignment.get("status") not in EDITABLE_SCORE_STATUSES:
+        raise HTTPException(status_code=400, detail="Skor hanya dapat diedit saat assignment berstatus Draft atau Draft Revisi")
+    if not require_draft and assignment.get("status") == "Belum Dimulai":
+        raise HTTPException(status_code=400, detail="Form penilaian belum dapat dibuka sebelum assignment dimulai")
+    if user["role"] == "pengawas" and assignment.get("assessor_user_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="Anda hanya dapat membuka assignment yang diberikan kepada Anda")
+    if user["role"] == "kepala_sekolah":
+        principal = await db.principals.find_one({"user_id": user["id"]}, {"_id": 0})
+        if not principal and user.get("linked_profile_id"):
+            principal = await db.principals.find_one({"id": user["linked_profile_id"]}, {"_id": 0})
+        school_id = (principal or {}).get("school_id")
+        if not school_id or school_id != assignment.get("school_id"):
+            raise HTTPException(status_code=403, detail="Anda hanya dapat membuka assignment guru di sekolah Anda")
+        if require_draft and assignment.get("assessor_user_id") != user["id"]:
+            raise HTTPException(status_code=403, detail="Anda hanya dapat mengisi assignment yang ditugaskan kepada Anda")
+    await _enrich_assignments([assignment])
+    return assignment
+
+async def _official_score_completion(assignment_id: str):
+    aspects = await db.observation_aspects.find({"status": "aktif"}, {"_id": 0, "id": 1}).to_list(2000)
+    required_ids = {a["id"] for a in aspects}
+    if not required_ids:
+        return {"required": 0, "scored": 0, "missing": 0}
+    scores = await db.assessment_scores.find({
+        "assignment_id": assignment_id,
+        "aspect_id": {"$in": list(required_ids)},
+    }, {"_id": 0, "aspect_id": 1, "score": 1}).to_list(2000)
+    scored_ids = {s["aspect_id"] for s in scores if isinstance(s.get("score"), int) and 1 <= s["score"] <= 4}
+    return {
+        "required": len(required_ids),
+        "scored": len(scored_ids),
+        "missing": max(len(required_ids) - len(scored_ids), 0),
+    }
+
+RTL_REQUIRED_FOR_SEND = [
+    "kesimpulan_hasil_observasi",
+    "aspek_kelebihan",
+    "aspek_perlu_perbaikan",
+    "rekomendasi_umum",
+    "kegiatan_pembinaan",
+    "sasaran_target",
+    "waktu_pelaksanaan",
+    "status_rtl",
+]
+
+def _evaluation_is_complete(evaluation: Optional[dict]) -> bool:
+    if not evaluation or evaluation.get("is_deleted"):
+        return False
+    return all((evaluation.get(field) or "").strip() for field in RTL_REQUIRED_FOR_SEND)
+
+async def _active_evaluation_followup(aid: str):
+    return await db.evaluation_followups.find_one(
+        {"assignment_id": aid, "is_deleted": {"$ne": True}},
+        {"_id": 0},
+    )
+
+async def _assert_evaluation_complete(aid: str):
+    evaluation = await _active_evaluation_followup(aid)
+    if not _evaluation_is_complete(evaluation):
+        raise HTTPException(status_code=400, detail="Evaluasi dan RTL harus dilengkapi sebelum penilaian dikirim ke Guru.")
+    return evaluation
+
+async def _assert_evaluation_complete_for_final(aid: str):
+    evaluation = await _active_evaluation_followup(aid)
+    if not _evaluation_is_complete(evaluation):
+        raise HTTPException(status_code=400, detail="Evaluasi dan RTL harus dilengkapi sebelum penilaian dapat difinalisasi.")
+    return evaluation
+
+async def _assignment_for_evaluation(aid: str, user: dict):
+    assignment = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment tidak ditemukan")
+    can_edit = False
+    if user["role"] == "admin":
+        can_view = True
+        can_edit = assignment.get("status") not in ASSIGNMENT_FINAL
+    elif user["role"] == "pengawas":
+        can_view = assignment.get("assessor_user_id") == user["id"]
+        can_edit = can_view
+    elif user["role"] == "kepala_sekolah":
+        principal = await db.principals.find_one({"user_id": user["id"]}, {"_id": 0})
+        if not principal and user.get("linked_profile_id"):
+            principal = await db.principals.find_one({"id": user["linked_profile_id"]}, {"_id": 0})
+        school_id = (principal or {}).get("school_id")
+        can_view = bool(school_id and school_id == assignment.get("school_id"))
+        can_edit = assignment.get("assessor_user_id") == user["id"]
+    elif user["role"] == "guru":
+        teacher = await _teacher_for_user(user)
+        can_view = bool(teacher and teacher.get("id") == assignment.get("teacher_id"))
+    else:
+        can_view = False
+    if not can_view:
+        raise HTTPException(status_code=403, detail="Anda tidak berhak mengakses Evaluasi & RTL assignment ini")
+    if assignment.get("status") == "Belum Dimulai":
+        raise HTTPException(status_code=400, detail="Evaluasi & RTL belum dapat dibuka sebelum assignment dimulai")
+    await _enrich_assignments([assignment])
+    return assignment, can_edit
+
+async def _report_scope_for_role(user: dict):
+    if user["role"] == "admin":
+        return {}
+    if user["role"] == "pengawas":
+        return {"assessor_user_id": user["id"]}
+    if user["role"] == "kepala_sekolah":
+        principal = await db.principals.find_one({"user_id": user["id"]}, {"_id": 0})
+        if not principal and user.get("linked_profile_id"):
+            principal = await db.principals.find_one({"id": user["linked_profile_id"]}, {"_id": 0})
+        school_id = (principal or {}).get("school_id")
+        return {"school_id": school_id} if school_id else {"school_id": "__none__"}
+    if user["role"] == "guru":
+        teacher = await _teacher_for_user(user)
+        teacher_id = (teacher or {}).get("id")
+        return {"teacher_id": teacher_id} if teacher_id else {"teacher_id": "__none__"}
+    raise HTTPException(status_code=403, detail="Akses report ditolak")
+
+async def _assignment_for_report(aid: str, user: dict):
+    scope = await _report_scope_for_role(user)
+    assignment = await db.assessment_assignments.find_one({"id": aid, **scope}, {"_id": 0})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Report tidak ditemukan atau Anda tidak memiliki akses")
+    if assignment.get("status") == "Belum Dimulai":
+        raise HTTPException(status_code=400, detail="Report belum tersedia sebelum assignment dimulai")
+    await _enrich_assignments([assignment])
+    return assignment
+
+async def _signature_permission(assignment: dict, user: dict):
+    if user["role"] == "admin":
+        return {"can_view": True, "can_sign": False}
+    if user["role"] == "guru":
+        teacher = await _teacher_for_user(user)
+        owns = bool(teacher and teacher.get("id") == assignment.get("teacher_id"))
+        return {"can_view": owns, "can_sign": owns}
+    if user["role"] == "pengawas":
+        owns = assignment.get("assessor_user_id") == user["id"]
+        return {"can_view": owns, "can_sign": owns}
+    if user["role"] == "kepala_sekolah":
+        principal = await db.principals.find_one({"user_id": user["id"]}, {"_id": 0})
+        if not principal and user.get("linked_profile_id"):
+            principal = await db.principals.find_one({"id": user["linked_profile_id"]}, {"_id": 0})
+        school_id = (principal or {}).get("school_id")
+        can_view = bool(school_id and school_id == assignment.get("school_id"))
+        can_sign = can_view and (assignment.get("assessor_user_id") == user["id"] or assignment.get("assessor_role") == "Kepala Sekolah")
+        return {"can_view": can_view, "can_sign": can_sign}
+    return {"can_view": False, "can_sign": False}
+
+async def _assert_signature(aid: str, user_id: str, role: Optional[str] = None):
+    query = {"assignment_id": aid, "user_id": user_id, "signature_status": "Sudah Ditandatangani"}
+    if role:
+        query["signer_role"] = role
+    signature = await db.digital_signatures.find_one(query, {"_id": 0})
+    if not signature:
+        raise HTTPException(status_code=400, detail="Tanda tangan digital wajib diisi sebelum proses ini dapat dilanjutkan.")
+    return signature
+
+async def _period_detail(period_id: Optional[str]):
+    period = await db.assessment_periods.find_one({"id": period_id}, {"_id": 0}) if period_id else None
+    year = await db.academic_years.find_one({"id": (period or {}).get("academic_year_id")}, {"_id": 0}) if period else None
+    semester = await db.semesters.find_one({"id": (period or {}).get("semester_id")}, {"_id": 0}) if period else None
+    return period, year, semester
+
+async def _period_sort_key(period: dict):
+    year = await db.academic_years.find_one({"id": period.get("academic_year_id")}, {"_id": 0}) if period else None
+    semester = await db.semesters.find_one({"id": period.get("semester_id")}, {"_id": 0}) if period else None
+    return ((year or {}).get("year_name") or "", int((semester or {}).get("semester_order") or 0), period.get("created_at") or "")
+
+async def _previous_period(current_period: dict):
+    if not current_period:
+        return None
+    periods = await db.assessment_periods.find({}, {"_id": 0}).to_list(1000)
+    keyed = []
+    for period in periods:
+        keyed.append((await _period_sort_key(period), period))
+    keyed.sort(key=lambda item: item[0])
+    current_index = next((idx for idx, (_, p) in enumerate(keyed) if p.get("id") == current_period.get("id")), None)
+    if current_index is None or current_index <= 0:
+        return None
+    return keyed[current_index - 1][1]
+
+def _category_comparison(current_categories: dict, previous_categories: dict):
+    out = []
+    names = {v.get("category_name") for v in current_categories.values()} | {v.get("category_name") for v in previous_categories.values()}
+    for name in sorted([n for n in names if n]):
+        current = next((v for v in current_categories.values() if v.get("category_name") == name), {})
+        previous = next((v for v in previous_categories.values() if v.get("category_name") == name), {})
+        c_val = current.get("average_score")
+        p_val = previous.get("average_score")
+        diff = round((c_val or 0) - (p_val or 0), 2) if c_val is not None and p_val is not None else None
+        label = "Belum ada data pembanding" if diff is None else ("Meningkat" if diff > 0 else "Menurun" if diff < 0 else "Stabil")
+        out.append({"category_name": name, "previous": p_val, "current": c_val, "difference": diff, "label": label})
+    return out
+
+async def _report_payload(assignment: dict):
+    payload = await _assessment_form_payload(assignment)
+    period, year, semester = await _period_detail(assignment.get("assessment_period_id"))
+    payload["period"] = period
+    payload["academic_year"] = year
+    payload["semester"] = semester
+
+    same_period = await db.assessment_assignments.find({
+        "teacher_id": assignment["teacher_id"],
+        "assessment_period_id": assignment["assessment_period_id"],
+        "status": {"$ne": "Belum Dimulai"},
+    }, {"_id": 0}).to_list(20)
+    await _enrich_assignments(same_period)
+    period_signatures = await db.digital_signatures.find({
+        "assignment_id": {"$in": [a["id"] for a in same_period]},
+    }, {"_id": 0}).sort("signed_at", 1).to_list(100)
+    values = [float(a.get("final_percentage") or 0) for a in same_period if a.get("final_percentage") is not None]
+    payload["combined_summary"] = {
+        "items": [{
+            "assignment_id": a["id"],
+            "assessor_role": a.get("assessor_role"),
+            "assessor_name": a.get("assessor_name"),
+            "status": a.get("status"),
+            "final_percentage": a.get("final_percentage"),
+        } for a in same_period],
+        "combined_average": round(sum(values) / len(values), 2) if values else 0,
+        "count": len(values),
+    }
+    payload["period_signatures"] = period_signatures
+
+    previous = await _previous_period(period)
+    comparison = {
+        "label": "Belum ada data pembanding",
+        "previous_period": previous,
+        "previous_value": None,
+        "current_value": payload["summary"]["final_percentage"],
+        "difference": None,
+        "categories": [],
+    }
+    if previous:
+        previous_assignment = await db.assessment_assignments.find_one({
+            "teacher_id": assignment["teacher_id"],
+            "assessment_period_id": previous["id"],
+            "assessor_role": assignment.get("assessor_role"),
+            "status": "Final",
+        }, {"_id": 0})
+        if previous_assignment:
+            await _enrich_assignments([previous_assignment])
+            previous_payload = await _assessment_form_payload(previous_assignment)
+            prev_value = previous_payload["summary"]["final_percentage"]
+            current_value = payload["summary"]["final_percentage"]
+            diff = round(current_value - prev_value, 2)
+            comparison.update({
+                "label": "Meningkat" if diff > 0 else "Menurun" if diff < 0 else "Stabil",
+                "previous_value": prev_value,
+                "difference": diff,
+                "categories": _category_comparison(payload["summary"]["categories"], previous_payload["summary"]["categories"]),
+            })
+    payload["semester_comparison"] = comparison
+    payload["export_requirements"] = _report_export_requirements(payload)
+    payload["export_ready"] = all(payload["export_requirements"].values())
+    return payload
+
+EXPORT_INCOMPLETE_MESSAGE = "Export PDF hanya tersedia setelah penilaian selesai dan seluruh data wajib sudah lengkap."
+
+def _required_report_signature_roles(assignment: dict):
+    roles = ["guru"]
+    assessor_role = assignment.get("assessor_role")
+    if assessor_role == "Kepala Sekolah":
+        roles.append("kepala_sekolah")
+    elif assessor_role == "Pengawas":
+        roles.append("pengawas")
+    return roles
+
+def _report_export_requirements(payload: dict):
+    assignment = payload.get("assignment") or {}
+    summary = payload.get("summary") or {}
+    signatures = payload.get("signatures") or []
+    signed_roles = {
+        s.get("signer_role")
+        for s in signatures
+        if s.get("signature_status") == "Sudah Ditandatangani" and s.get("signature_image")
+    }
+    required_roles = _required_report_signature_roles(assignment)
+    return {
+        "status_final": assignment.get("status") == "Final",
+        "scores_complete": int(summary.get("unscored_count") or 0) == 0 and int(summary.get("aspect_count") or 0) > 0,
+        "evaluation_complete": bool(payload.get("evaluation_complete")),
+        "required_signatures_complete": all(role in signed_roles for role in required_roles),
+    }
+
+async def _teacher_review_assignment(aid: str, user: dict):
+    if user["role"] != "guru":
+        raise HTTPException(status_code=403, detail="Hanya Guru yang dapat mereview hasil penilaian")
+    assignment = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment tidak ditemukan")
+    teacher = await _teacher_for_user(user)
+    if not teacher or assignment.get("teacher_id") != teacher.get("id"):
+        raise HTTPException(status_code=403, detail="Anda hanya dapat melihat penilaian milik sendiri")
+    if assignment.get("status") not in REVIEW_VISIBLE_STATUSES:
+        raise HTTPException(status_code=400, detail="Hasil penilaian belum tersedia untuk direview")
+    await _enrich_assignments([assignment])
+    return assignment
+
+async def _assessment_form_payload(assignment: dict):
+    teacher = await db.teachers.find_one({"id": assignment.get("teacher_id")}, {"_id": 0})
+    school = await db.schools.find_one({"id": assignment.get("school_id")}, {"_id": 0})
+    assessor = await db.users.find_one({"id": assignment.get("assessor_user_id")}, {"_id": 0, "password_hash": 0})
+    categories = await db.observation_categories.find({"status": "aktif"}, {"_id": 0}).sort("display_order", 1).to_list(200)
+    aspects = await db.observation_aspects.find({"status": "aktif"}, {"_id": 0}).sort([("category_id", 1), ("display_order", 1)]).to_list(2000)
+    proposed_aspects = await db.teacher_proposed_aspects.find({
+        "assignment_id": assignment["id"],
+        "status": "Approved",
+    }, {"_id": 0}).sort("created_at", 1).to_list(2000)
+    await _enrich_proposed_aspects(proposed_aspects)
+    scores = await db.assessment_scores.find({"assignment_id": assignment["id"]}, {"_id": 0}).to_list(2000)
+    feedbacks = await db.teacher_assessment_feedbacks.find({"assignment_id": assignment["id"]}, {"_id": 0}).sort("feedback_round", 1).to_list(10)
+    evaluation = await _active_evaluation_followup(assignment["id"])
+    signatures = await db.digital_signatures.find({"assignment_id": assignment["id"]}, {"_id": 0}).sort("signed_at", 1).to_list(20)
+    score_map = {s["aspect_id"]: s for s in scores}
+    active_aspect_ids = {a["id"] for a in aspects}
+    active_scores = [s for s in scores if s.get("aspect_id") in active_aspect_ids and isinstance(s.get("score"), int)]
+    total_score = sum(s["score"] for s in active_scores)
+    scored_count = len(active_scores)
+    max_score = len(aspects) * 4
+    category_summary = {}
+    for category in categories:
+        cat_aspects = [a for a in aspects if a.get("category_id") == category["id"]]
+        cat_scores = [score_map.get(a["id"], {}).get("score") for a in cat_aspects]
+        cat_scores = [s for s in cat_scores if isinstance(s, int)]
+        category_summary[category["id"]] = {
+            "category_name": category["category_name"],
+            "total_score": sum(cat_scores),
+            "scored_count": len(cat_scores),
+            "aspect_count": len(cat_aspects),
+            "average_score": round(sum(cat_scores) / len(cat_scores), 2) if cat_scores else 0,
+        }
+    return {
+        "assignment": assignment,
+        "teacher": teacher,
+        "school": school,
+        "assessor": assessor,
+        "categories": categories,
+        "aspects": aspects,
+        "proposed_aspects": proposed_aspects,
+        "scores": scores,
+        "feedbacks": feedbacks,
+        "signatures": signatures,
+        "evaluation_followup": evaluation,
+        "evaluation_complete": _evaluation_is_complete(evaluation),
+        "summary": {
+            "total_score": total_score,
+            "scored_count": scored_count,
+            "aspect_count": len(aspects),
+            "unscored_count": max(len(aspects) - scored_count, 0),
+            "average_score": round(total_score / scored_count, 2) if scored_count else 0,
+            "max_score": max_score,
+            "final_percentage": round((total_score / max_score) * 100, 2) if max_score else 0,
+            "categories": category_summary,
+        },
+    }
+
+
+@api.get("/proposed-aspects/me")
+async def my_proposed_aspects(user=Depends(require_roles("guru"))):
+    period = await _get_active_period()
+    teacher = await _teacher_for_user(user)
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Profil guru tidak ditemukan")
+    categories = await db.observation_categories.find({"status": "aktif"}, {"_id": 0}).sort("display_order", 1).to_list(200)
+    assignments = []
+    if period:
+        assignments = await db.assessment_assignments.find({
+            "teacher_id": teacher["id"],
+            "assessment_period_id": period["id"],
+        }, {"_id": 0}).sort("created_at", 1).to_list(20)
+        await _enrich_assignments(assignments)
+    proposals = await db.teacher_proposed_aspects.find({"teacher_id": teacher["id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    await _enrich_proposed_aspects(proposals)
+    return {
+        "active_period": period,
+        "teacher": teacher,
+        "categories": categories,
+        "assignments": assignments,
+        "proposals": proposals,
+    }
+
+@api.post("/proposed-aspects")
+async def create_proposed_aspect(body: ProposedAspectCreate, user=Depends(require_roles("guru"))):
+    period = await _get_active_period()
+    if not period:
+        raise HTTPException(status_code=400, detail="Belum ada periode penilaian aktif")
+    teacher = await _teacher_for_user(user)
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Profil guru tidak ditemukan")
+    category = await db.observation_categories.find_one({"id": body.category_id, "status": "aktif"}, {"_id": 0})
+    if not category:
+        raise HTTPException(status_code=400, detail="Kategori observasi tidak ditemukan atau tidak aktif")
+    aspect_name = (body.aspect_name or "").strip()
+    if not aspect_name:
+        raise HTTPException(status_code=400, detail="Nama aspek wajib diisi")
+    assignment, assignments = await _active_proposal_assignment_for_teacher(teacher["id"], period["id"], body.assignment_id)
+    if assignment.get("status") in ASSIGNMENT_FINAL:
+        raise HTTPException(status_code=400, detail="Assignment final tidak dapat menerima usulan aspek")
+    normalized_name = _normalize_aspect_name(aspect_name)
+    duplicate = await db.teacher_proposed_aspects.find_one({
+        "teacher_id": teacher["id"],
+        "assessment_period_id": period["id"],
+        "aspect_name_normalized": normalized_name,
+    })
+    if duplicate:
+        raise HTTPException(status_code=400, detail="Usulan aspek dengan nama yang sama sudah ada pada periode ini")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "teacher_id": teacher["id"],
+        "school_id": teacher.get("school_id"),
+        "assessment_period_id": period["id"],
+        "assignment_id": assignment["id"],
+        "category_id": category["id"],
+        "aspect_name": aspect_name,
+        "aspect_name_normalized": normalized_name,
+        "aspect_description": body.aspect_description or "",
+        "reason": body.reason or "",
+        "status": "Pending",
+        "review_notes": "",
+        "reviewed_by": None,
+        "reviewed_at": None,
+        "include_in_score": False,
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    await db.teacher_proposed_aspects.insert_one(doc)
+    await audit(user["id"], "submit", "teacher_proposed_aspects", doc["id"], None, doc)
+    doc.pop("_id", None)
+    await _enrich_proposed_aspects([doc])
+    return doc
+
+@api.put("/proposed-aspects/{pid}")
+async def update_proposed_aspect(pid: str, body: ProposedAspectUpdate, user=Depends(require_roles("guru"))):
+    existing = await db.teacher_proposed_aspects.find_one({"id": pid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Usulan aspek tidak ditemukan")
+    teacher = await _teacher_for_user(user)
+    if not teacher or existing.get("teacher_id") != teacher.get("id"):
+        raise HTTPException(status_code=403, detail="Anda hanya boleh mengubah usulan milik sendiri")
+    if existing.get("status") != "Pending":
+        raise HTTPException(status_code=400, detail="Usulan hanya dapat diubah saat status Pending")
+    upd = body.model_dump(exclude_unset=True)
+    if "category_id" in upd:
+        category = await db.observation_categories.find_one({"id": upd["category_id"], "status": "aktif"}, {"_id": 0})
+        if not category:
+            raise HTTPException(status_code=400, detail="Kategori observasi tidak ditemukan atau tidak aktif")
+    if "assignment_id" in upd and upd["assignment_id"]:
+        await _active_proposal_assignment_for_teacher(existing["teacher_id"], existing["assessment_period_id"], upd["assignment_id"])
+    if "aspect_name" in upd:
+        aspect_name = (upd["aspect_name"] or "").strip()
+        if not aspect_name:
+            raise HTTPException(status_code=400, detail="Nama aspek wajib diisi")
+        normalized_name = _normalize_aspect_name(aspect_name)
+        duplicate = await db.teacher_proposed_aspects.find_one({
+            "teacher_id": existing["teacher_id"],
+            "assessment_period_id": existing["assessment_period_id"],
+            "aspect_name_normalized": normalized_name,
+            "id": {"$ne": pid},
+        })
+        if duplicate:
+            raise HTTPException(status_code=400, detail="Usulan aspek dengan nama yang sama sudah ada pada periode ini")
+        upd["aspect_name"] = aspect_name
+        upd["aspect_name_normalized"] = normalized_name
+    upd["updated_at"] = now_iso()
+    await db.teacher_proposed_aspects.update_one({"id": pid}, {"$set": upd})
+    await audit(user["id"], "edit", "teacher_proposed_aspects", pid, clean(existing), upd)
+    doc = await db.teacher_proposed_aspects.find_one({"id": pid}, {"_id": 0})
+    await _enrich_proposed_aspects([doc])
+    return doc
+
+@api.post("/proposed-aspects/{pid}/cancel")
+async def cancel_proposed_aspect(pid: str, user=Depends(require_roles("guru"))):
+    existing = await db.teacher_proposed_aspects.find_one({"id": pid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Usulan aspek tidak ditemukan")
+    teacher = await _teacher_for_user(user)
+    if not teacher or existing.get("teacher_id") != teacher.get("id"):
+        raise HTTPException(status_code=403, detail="Anda hanya boleh membatalkan usulan milik sendiri")
+    if existing.get("status") != "Pending":
+        raise HTTPException(status_code=400, detail="Usulan hanya dapat dibatalkan saat status Pending")
+    upd = {"status": "Cancelled", "updated_at": now_iso()}
+    await db.teacher_proposed_aspects.update_one({"id": pid}, {"$set": upd})
+    await audit(user["id"], "cancel", "teacher_proposed_aspects", pid, clean(existing), upd)
+    doc = await db.teacher_proposed_aspects.find_one({"id": pid}, {"_id": 0})
+    await _enrich_proposed_aspects([doc])
+    return doc
+
+@api.get("/proposed-aspects/review")
+async def list_proposed_aspects_for_review(user=Depends(require_roles("admin", "pengawas", "kepala_sekolah"))):
+    scope = await _review_scope_for_proposals(user)
+    proposals = await db.teacher_proposed_aspects.find(scope, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    await _enrich_proposed_aspects(proposals)
+    return proposals
+
+@api.post("/proposed-aspects/{pid}/review")
+async def review_proposed_aspect(pid: str, body: ProposedAspectReview, user=Depends(require_roles("admin", "pengawas", "kepala_sekolah"))):
+    existing = await db.teacher_proposed_aspects.find_one({"id": pid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Usulan aspek tidak ditemukan")
+    if existing.get("teacher_id") == user.get("linked_profile_id"):
+        raise HTTPException(status_code=403, detail="Guru tidak boleh mereview usulan sendiri")
+    await _assert_can_review_proposal(existing, user)
+    if existing.get("status") != "Pending":
+        raise HTTPException(status_code=400, detail="Hanya usulan Pending yang dapat direview")
+    upd = {
+        "status": body.status,
+        "review_notes": body.review_notes or "",
+        "reviewed_by": user["id"],
+        "reviewed_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    await db.teacher_proposed_aspects.update_one({"id": pid}, {"$set": upd})
+    await audit(user["id"], body.status.lower(), "teacher_proposed_aspects", pid, clean(existing), upd)
+    teacher_user_id = await _teacher_user_id(existing.get("teacher_id"))
+    await notify_user(
+        teacher_user_id,
+        f"Usulan aspek {body.status}",
+        f"Usulan aspek '{existing.get('aspect_name')}' telah {body.status}.",
+        "success" if body.status == "Approved" else "warning",
+        "teacher_proposed_aspects",
+        pid,
+    )
+    doc = await db.teacher_proposed_aspects.find_one({"id": pid}, {"_id": 0})
+    await _enrich_proposed_aspects([doc])
+    return doc
+
 
 @api.get("/assignments")
 async def list_assignments(user=Depends(get_current_user)):
@@ -1113,6 +1853,108 @@ async def list_assignments(user=Depends(get_current_user)):
     items = await db.assessment_assignments.find(scope, {"_id": 0}).sort("created_at", -1).to_list(2000)
     await _enrich_assignments(items)
     return items
+
+@api.get("/audit-logs")
+async def list_audit_logs(request: Request, user=Depends(require_roles("admin"))):
+    params = request.query_params
+    query = {}
+    date_from = params.get("date_from")
+    date_to = params.get("date_to")
+    try:
+        page = max(int(params.get("page") or 1), 1)
+        limit = min(max(int(params.get("limit") or 50), 1), 200)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Format pagination audit log tidak valid")
+    if date_from or date_to:
+        query["created_at"] = {}
+        if date_from:
+            try:
+                datetime.fromisoformat(date_from)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Format tanggal mulai tidak valid")
+            query["created_at"]["$gte"] = date_from
+        if date_to:
+            try:
+                datetime.fromisoformat(date_to)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Format tanggal selesai tidak valid")
+            query["created_at"]["$lte"] = f"{date_to}T23:59:59.999999+00:00" if len(date_to) == 10 else date_to
+    for key, field in [("user_id", "user_id"), ("action", "action"), ("module", "table_name")]:
+        value = params.get(key)
+        if value and value != "semua":
+            query[field] = value
+    role = params.get("role")
+    if role and role != "semua":
+        user_ids = await db.users.distinct("id", {"role": role})
+        query["user_id"] = {"$in": user_ids or ["__none__"]}
+    search = (params.get("search") or "").strip()
+    if search:
+        query["$or"] = [
+            {"action": {"$regex": search, "$options": "i"}},
+            {"table_name": {"$regex": search, "$options": "i"}},
+            {"record_id": {"$regex": search, "$options": "i"}},
+        ]
+    total = await db.audit_logs.count_documents(query)
+    logs = await db.audit_logs.find(query, {"_id": 0}).sort("created_at", -1).skip((page - 1) * limit).limit(limit).to_list(limit)
+    user_ids = {l.get("user_id") for l in logs if l.get("user_id")}
+    users = {
+        u["id"]: u
+        async for u in db.users.find({"id": {"$in": list(user_ids)}}, {"_id": 0, "password_hash": 0})
+    } if user_ids else {}
+    for log in logs:
+        actor = users.get(log.get("user_id"), {})
+        log.setdefault("id", log.get("record_id") or str(uuid.uuid4()))
+        log.setdefault("action", "-")
+        log.setdefault("table_name", "-")
+        log.setdefault("record_id", "-")
+        log.setdefault("old_value", {})
+        log.setdefault("new_value", {})
+        log.setdefault("created_at", "")
+        log["user_name"] = actor.get("name") or "-"
+        log["user_role"] = actor.get("role") or "-"
+    return {"logs": json_safe(logs), "total": total, "page": page, "limit": limit}
+
+@api.get("/audit-logs/options")
+async def audit_log_options(user=Depends(require_roles("admin"))):
+    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).sort("name", 1).to_list(1000)
+    actions = await db.audit_logs.distinct("action")
+    modules = await db.audit_logs.distinct("table_name")
+    return {
+        "users": json_safe(users),
+        "roles": ["admin", "pengawas", "kepala_sekolah", "guru"],
+        "actions": sorted([str(a) for a in actions if a]),
+        "modules": sorted([str(m) for m in modules if m]),
+    }
+
+@api.get("/notifications")
+async def list_notifications(user=Depends(get_current_user)):
+    query = {} if user["role"] == "admin" else {"user_id": user["id"]}
+    items = await db.notifications.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    if user["role"] != "admin":
+        items = [it for it in items if it.get("user_id") == user["id"]]
+    return items
+
+@api.get("/notifications/unread-count")
+async def notification_unread_count(user=Depends(get_current_user)):
+    count = await db.notifications.count_documents({"user_id": user["id"], "is_read": False})
+    return {"count": count}
+
+@api.post("/notifications/{nid}/read")
+async def mark_notification_read(nid: str, user=Depends(get_current_user)):
+    query = {"id": nid} if user["role"] == "admin" else {"id": nid, "user_id": user["id"]}
+    existing = await db.notifications.find_one(query, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Notifikasi tidak ditemukan")
+    await db.notifications.update_one({"id": nid}, {"$set": {"is_read": True, "read_at": now_iso()}})
+    return {"ok": True}
+
+@api.post("/notifications/mark-all-read")
+async def mark_all_notifications_read(user=Depends(get_current_user)):
+    await db.notifications.update_many(
+        {"user_id": user["id"], "is_read": False},
+        {"$set": {"is_read": True, "read_at": now_iso()}},
+    )
+    return {"ok": True}
 
 @api.get("/assignments/me")
 async def my_assignment(user=Depends(get_current_user)):
@@ -1177,6 +2019,9 @@ async def create_assignment(body: AssignmentCreate, user=Depends(require_roles("
         "observation_date": body.observation_date or "",
         "assignment_type": a_type,
         "status": "Belum Dimulai",
+        "feedback_count": 0,
+        "teacher_review_status": "Belum Dikirim",
+        "teacher_review_completed": False,
         "notes": body.notes or "",
         "created_by": user["id"],
         "created_at": now_iso(),
@@ -1184,6 +2029,14 @@ async def create_assignment(body: AssignmentCreate, user=Depends(require_roles("
     }
     await db.assessment_assignments.insert_one(doc)
     await audit(user["id"], "create", "assessment_assignments", doc["id"], None, doc)
+    await notify_user(
+        assessor["id"],
+        "Assignment penilaian baru",
+        f"Anda ditugaskan menilai {teacher.get('name')} sebagai {role_label}.",
+        "info",
+        "assessment_assignments",
+        doc["id"],
+    )
     doc.pop("_id", None)
     await _enrich_assignments([doc])
     return doc
@@ -1243,12 +2096,663 @@ async def start_assignment(aid: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Hanya penilai yang ditugaskan dapat memulai penilaian")
     if existing.get("status") not in ("Belum Dimulai",):
         raise HTTPException(status_code=400, detail="Penilaian sudah dimulai sebelumnya")
-    upd = {"status": "Draft", "updated_at": now_iso()}
+    upd = {
+        "status": "Draft",
+        "teacher_review_status": "Belum Dikirim",
+        "teacher_review_completed": False,
+        "updated_at": now_iso(),
+    }
     await db.assessment_assignments.update_one({"id": aid}, {"$set": upd})
     await audit(user["id"], "start", "assessment_assignments", aid, {"status": existing.get("status")}, upd)
+    teacher_user_id = await _teacher_user_id(existing.get("teacher_id"))
+    await notify_user(
+        teacher_user_id,
+        "Penilaian dimulai",
+        "Penilai telah memulai proses penilaian Anda.",
+        "info",
+        "assessment_assignments",
+        aid,
+    )
     new_doc = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
     await _enrich_assignments([new_doc])
     return new_doc
+
+@api.get("/assignments/{aid}/assessment-form")
+async def get_assessment_form(aid: str, user=Depends(get_current_user)):
+    assignment = await _assignment_for_assessment_form(aid, user, require_draft=False)
+    return await _assessment_form_payload(assignment)
+
+@api.put("/assignments/{aid}/assessment-scores")
+async def save_assessment_scores(aid: str, body: AssessmentScoresSave, user=Depends(get_current_user)):
+    assignment = await _assignment_for_assessment_form(aid, user, require_draft=True)
+    aspects = await db.observation_aspects.find({"status": "aktif"}, {"_id": 0}).to_list(2000)
+    aspect_map = {a["id"]: a for a in aspects}
+    proposed_aspects = await db.teacher_proposed_aspects.find({
+        "assignment_id": aid,
+        "status": "Approved",
+    }, {"_id": 0}).to_list(2000)
+    proposed_map = {a["id"]: a for a in proposed_aspects}
+    seen = set()
+    old_scores = await db.assessment_scores.find({"assignment_id": aid}, {"_id": 0}).to_list(2000)
+    for item in body.scores:
+        if item.aspect_id in seen:
+            raise HTTPException(status_code=400, detail="Aspek penilaian tidak boleh duplikat dalam satu penyimpanan")
+        seen.add(item.aspect_id)
+        aspect = aspect_map.get(item.aspect_id)
+        proposed = proposed_map.get(item.aspect_id)
+        if not aspect and not proposed:
+            raise HTTPException(status_code=400, detail="Aspek penilaian tidak aktif atau tidak ditemukan")
+        now = now_iso()
+        category_id = aspect["category_id"] if aspect else proposed["category_id"]
+        await db.assessment_scores.update_one(
+            {"assignment_id": aid, "aspect_id": item.aspect_id},
+            {
+                "$set": {
+                    "assignment_id": aid,
+                    "teacher_id": assignment["teacher_id"],
+                    "assessor_user_id": assignment["assessor_user_id"],
+                    "assessment_period_id": assignment["assessment_period_id"],
+                    "category_id": category_id,
+                    "aspect_id": item.aspect_id,
+                    "source": "official" if aspect else "proposed",
+                    "include_in_score": bool(aspect),
+                    "proposed_aspect_id": proposed["id"] if proposed else None,
+                    "score": item.score,
+                    "notes": item.notes or "",
+                    "updated_at": now,
+                },
+                "$setOnInsert": {
+                    "id": str(uuid.uuid4()),
+                    "created_at": now,
+                },
+            },
+            upsert=True,
+        )
+    new_scores = await db.assessment_scores.find({"assignment_id": aid}, {"_id": 0}).to_list(2000)
+    await audit(user["id"], "save_scores", "assessment_scores", aid, old_scores, new_scores)
+    fresh_assignment = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
+    await _enrich_assignments([fresh_assignment])
+    return await _assessment_form_payload(fresh_assignment)
+
+@api.post("/assignments/{aid}/send-to-teacher")
+async def send_assignment_to_teacher(aid: str, user=Depends(get_current_user)):
+    assignment = await _assignment_for_assessment_form(aid, user, require_draft=False)
+    if user["role"] != "admin" and assignment.get("assessor_user_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="Hanya penilai yang ditugaskan yang boleh mengirim penilaian ke Guru")
+    status_now = assignment.get("status")
+    if status_now not in EDITABLE_SCORE_STATUSES:
+        raise HTTPException(status_code=400, detail="Assignment hanya dapat dikirim saat status Draft atau Draft Revisi")
+    completion = await _official_score_completion(aid)
+    if completion["required"] < 1:
+        raise HTTPException(status_code=400, detail="Belum ada aspek resmi aktif untuk dinilai")
+    if completion["missing"] > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Semua aspek resmi wajib diberi skor sebelum dikirim ke Guru. Masih ada {completion['missing']} aspek belum dinilai.",
+        )
+    await _assert_evaluation_complete(aid)
+    feedback_count = int(assignment.get("feedback_count") or 0)
+    final_after_second_feedback = status_now == "Draft Revisi" and feedback_count >= 2
+    final_ready = False
+    if final_after_second_feedback:
+        try:
+            await _assert_evaluation_complete_for_final(aid)
+            await _assert_signature(aid, assignment["assessor_user_id"])
+            final_ready = True
+        except HTTPException:
+            final_ready = False
+    next_status = "Final" if final_ready else "Menunggu Review Guru"
+    upd = {
+        "status": next_status,
+        "feedback_count": feedback_count,
+        "sent_to_teacher_at": now_iso(),
+        "updated_at": now_iso(),
+        "teacher_review_status": "Feedback Maksimal Diproses" if final_after_second_feedback else "Menunggu Review Guru",
+        "teacher_review_completed": bool(final_after_second_feedback),
+    }
+    if next_status == "Final":
+        upd["finalized_at"] = now_iso()
+        upd["teacher_review_completed"] = True
+        upd["teacher_review_completed_at"] = now_iso()
+    elif final_after_second_feedback:
+        upd["teacher_review_completed_at"] = now_iso()
+    await db.assessment_assignments.update_one({"id": aid}, {"$set": upd})
+    action = "status_final" if next_status == "Final" else ("send_revision_to_teacher" if status_now == "Draft Revisi" else "send_to_teacher")
+    await audit(user["id"], action, "assessment_assignments", aid, {"status": status_now}, upd)
+    teacher_user_id = await _teacher_user_id(assignment.get("teacher_id"))
+    if next_status == "Final":
+        await notify_user(teacher_user_id, "Penilaian Final", "Penilaian Anda telah menjadi Final.", "success", "assessment_assignments", aid)
+        await notify_user(assignment.get("assessor_user_id"), "Penilaian Final", "Assignment penilaian telah menjadi Final.", "success", "assessment_assignments", aid)
+    elif final_after_second_feedback:
+        await notify_user(teacher_user_id, "Revisi terakhir diproses", "Feedback maksimal telah diproses. Penilai akan melengkapi finalisasi.", "info", "assessment_assignments", aid)
+        await notify_user(assignment.get("assessor_user_id"), "Lengkapi Evaluasi & RTL", "Review Guru selesai. Lengkapi Evaluasi & RTL sebelum finalisasi.", "warning", "assessment_assignments", aid)
+    else:
+        title = "Revisi penilaian dikirim" if status_now == "Draft Revisi" else "Penilaian dikirim ke Guru"
+        await notify_user(teacher_user_id, title, "Silakan review hasil penilaian Anda.", "info", "assessment_assignments", aid)
+    fresh = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
+    await _enrich_assignments([fresh])
+    return await _assessment_form_payload(fresh)
+
+@api.post("/assignments/{aid}/start-revision")
+async def start_assignment_revision(aid: str, user=Depends(get_current_user)):
+    assignment = await _assignment_for_assessment_form(aid, user, require_draft=False)
+    if user["role"] != "admin" and assignment.get("assessor_user_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="Hanya penilai yang ditugaskan yang boleh memulai revisi")
+    if assignment.get("status") != "Feedback dari Guru":
+        raise HTTPException(status_code=400, detail="Revisi hanya dapat dimulai setelah ada feedback dari Guru")
+    upd = {
+        "status": "Draft Revisi",
+        "teacher_review_status": "Draft Revisi",
+        "teacher_review_completed": False,
+        "revision_started_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    await db.assessment_assignments.update_one({"id": aid}, {"$set": upd})
+    await audit(user["id"], "start_revision", "assessment_assignments", aid, {"status": assignment.get("status")}, upd)
+    await notify_user(
+        await _teacher_user_id(assignment.get("teacher_id")),
+        "Revisi penilaian diproses",
+        "Penilai mulai memproses feedback Anda.",
+        "info",
+        "assessment_assignments",
+        aid,
+    )
+    fresh = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
+    await _enrich_assignments([fresh])
+    return await _assessment_form_payload(fresh)
+
+@api.get("/assignments/{aid}/teacher-review")
+async def get_teacher_review(aid: str, user=Depends(get_current_user)):
+    assignment = await _teacher_review_assignment(aid, user)
+    return await _assessment_form_payload(assignment)
+
+@api.get("/assignments/{aid}/evaluation-followup")
+async def get_evaluation_followup(aid: str, user=Depends(get_current_user)):
+    assignment, can_edit = await _assignment_for_evaluation(aid, user)
+    payload = await _assessment_form_payload(assignment)
+    payload["can_edit_evaluation"] = can_edit and assignment.get("status") not in ASSIGNMENT_FINAL
+    return payload
+
+@api.get("/evaluation-followups/admin")
+async def admin_list_evaluation_followups(request: Request, user=Depends(require_roles("admin"))):
+    params = request.query_params
+    assignment_query = {}
+    for key, field in [
+        ("period_id", "assessment_period_id"),
+        ("school_id", "school_id"),
+        ("teacher_id", "teacher_id"),
+        ("assessor_user_id", "assessor_user_id"),
+        ("assignment_status", "status"),
+    ]:
+        value = params.get(key)
+        if value and value != "semua":
+            assignment_query[field] = value
+    assignments = await db.assessment_assignments.find(assignment_query, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    await _enrich_assignments(assignments)
+    assignment_ids = [a["id"] for a in assignments]
+    evaluations = {
+        e["assignment_id"]: e
+        async for e in db.evaluation_followups.find({"assignment_id": {"$in": assignment_ids}}, {"_id": 0})
+    } if assignment_ids else {}
+    status_rtl = params.get("status_rtl")
+    has_evaluation = params.get("has_evaluation")
+    rows = []
+    for assignment in assignments:
+        evaluation = evaluations.get(assignment["id"])
+        deleted = bool((evaluation or {}).get("is_deleted"))
+        active_eval = evaluation if evaluation and not deleted else None
+        if status_rtl and status_rtl != "semua":
+            if not active_eval or active_eval.get("status_rtl") != status_rtl:
+                continue
+        if has_evaluation == "yes" and not active_eval:
+            continue
+        if has_evaluation == "no" and evaluation:
+            continue
+        if has_evaluation == "deleted" and not deleted:
+            continue
+        rows.append({
+            "assignment": assignment,
+            "evaluation_followup": evaluation,
+            "has_evaluation": bool(active_eval),
+            "evaluation_deleted": deleted,
+            "evaluation_complete": _evaluation_is_complete(active_eval),
+        })
+    return rows
+
+@api.put("/assignments/{aid}/evaluation-followup")
+async def save_evaluation_followup(aid: str, body: EvaluationFollowupIn, user=Depends(get_current_user)):
+    assignment, can_edit = await _assignment_for_evaluation(aid, user)
+    if not can_edit:
+        raise HTTPException(status_code=403, detail="Hanya penilai yang ditugaskan yang boleh mengisi Evaluasi & RTL")
+    if assignment.get("status") in ASSIGNMENT_FINAL:
+        raise HTTPException(status_code=400, detail="Evaluasi & RTL tidak dapat diedit setelah assignment Final")
+    completion = await _official_score_completion(aid)
+    if completion["missing"] > 0 or completion["required"] < 1:
+        raise HTTPException(status_code=400, detail="Evaluasi & RTL hanya dapat diisi setelah semua aspek resmi memiliki skor")
+    existing = await db.evaluation_followups.find_one({"assignment_id": aid})
+    if existing and existing.get("is_deleted") and user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Evaluasi & RTL yang terhapus hanya dapat direstore oleh Admin")
+    now = now_iso()
+    payload = body.model_dump()
+    doc_update = {
+        **payload,
+        "assignment_id": assignment["id"],
+        "teacher_id": assignment["teacher_id"],
+        "school_id": assignment["school_id"],
+        "assessor_user_id": assignment["assessor_user_id"],
+        "assessment_period_id": assignment["assessment_period_id"],
+        "is_deleted": False,
+        "deleted_at": None,
+        "deleted_by": None,
+        "restored_at": now if existing and existing.get("is_deleted") else None,
+        "updated_by": user["id"],
+        "updated_at": now,
+    }
+    if existing:
+        await db.evaluation_followups.update_one({"assignment_id": aid}, {"$set": doc_update})
+        action = "restore" if existing.get("is_deleted") else "update"
+        await audit(user["id"], action, "evaluation_followups", existing["id"], clean(existing), doc_update)
+    else:
+        doc_update.update({
+            "id": str(uuid.uuid4()),
+            "created_by": user["id"],
+            "created_at": now,
+        })
+        await db.evaluation_followups.insert_one(doc_update)
+        await audit(user["id"], "create", "evaluation_followups", doc_update["id"], None, doc_update)
+    await notify_user(
+        assignment.get("assessor_user_id"),
+        "Evaluasi & RTL diperbarui",
+        "Data Evaluasi & RTL assignment telah disimpan.",
+        "info",
+        "evaluation_followups",
+        aid,
+    )
+    fresh = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
+    await _enrich_assignments([fresh])
+    return await _assessment_form_payload(fresh)
+
+@api.post("/assignments/{aid}/finalize")
+async def finalize_assignment(aid: str, user=Depends(get_current_user)):
+    assignment, can_edit = await _assignment_for_evaluation(aid, user)
+    if not can_edit:
+        raise HTTPException(status_code=403, detail="Hanya penilai yang ditugaskan yang boleh finalisasi penilaian")
+    if user["role"] == "admin" and assignment.get("assessor_user_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="Admin belum dapat finalisasi assignment pada tahap ini")
+    if assignment.get("status") in ASSIGNMENT_FINAL:
+        raise HTTPException(status_code=400, detail="Assignment sudah Final")
+    completion = await _official_score_completion(aid)
+    if completion["required"] < 1 or completion["missing"] > 0:
+        raise HTTPException(status_code=400, detail="Semua aspek resmi wajib diberi skor sebelum finalisasi")
+    await _assert_review_complete_for_final(assignment)
+    await _assert_evaluation_complete_for_final(aid)
+    await _assert_signature(aid, assignment["assessor_user_id"])
+    upd = {
+        "status": "Final",
+        "teacher_review_completed": True,
+        "teacher_review_status": assignment.get("teacher_review_status") or "Selesai",
+        "finalized_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    await db.assessment_assignments.update_one({"id": aid}, {"$set": upd})
+    await audit(user["id"], "finalize", "assessment_assignments", aid, {"status": assignment.get("status")}, upd)
+    teacher_user_id = await _teacher_user_id(assignment.get("teacher_id"))
+    await notify_user(teacher_user_id, "Penilaian Final", "Penilaian Anda telah difinalisasi.", "success", "assessment_assignments", aid)
+    await notify_user(assignment.get("assessor_user_id"), "Penilaian Final", "Assignment penilaian telah difinalisasi.", "success", "assessment_assignments", aid)
+    fresh = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
+    await _enrich_assignments([fresh])
+    return await _assessment_form_payload(fresh)
+
+@api.post("/assignments/{aid}/emergency-unlock")
+async def emergency_unlock_assignment(aid: str, body: AdminReasonIn, user=Depends(require_roles("admin"))):
+    reason = (body.reason or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Alasan Emergency Unlock wajib diisi")
+    assignment = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment tidak ditemukan")
+    if assignment.get("status") not in ASSIGNMENT_FINAL:
+        raise HTTPException(status_code=400, detail="Emergency Unlock hanya dapat dilakukan pada assignment Final")
+    now = now_iso()
+    upd = {
+        "status": "Draft Revisi",
+        "emergency_unlocked": True,
+        "emergency_unlock_reason": reason,
+        "signatures_need_update": True,
+        "updated_at": now,
+    }
+    log_doc = {
+        "id": str(uuid.uuid4()),
+        "assignment_id": aid,
+        "unlocked_by": user["id"],
+        "reason": reason,
+        "previous_status": assignment.get("status"),
+        "new_status": "Draft Revisi",
+        "unlocked_at": now,
+        "notes": body.notes or "",
+    }
+    await db.assessment_assignments.update_one({"id": aid}, {"$set": upd})
+    await db.digital_signatures.update_many(
+        {"assignment_id": aid},
+        {"$set": {"signature_status": "Perlu Diperbarui", "updated_at": now}},
+    )
+    await db.emergency_unlock_logs.insert_one(log_doc)
+    await audit(user["id"], "emergency_unlock", "assessment_assignments", aid, {"status": assignment.get("status")}, {**upd, "reason": reason})
+    await notify_user(assignment.get("assessor_user_id"), "Emergency Unlock", "Assignment Final dibuka kembali untuk revisi.", "warning", "assessment_assignments", aid)
+    await notify_user(await _teacher_user_id(assignment.get("teacher_id")), "Emergency Unlock", "Penilaian Final Anda dibuka kembali untuk revisi.", "warning", "assessment_assignments", aid)
+    await notify_admins("Emergency Unlock dilakukan", f"Assignment {aid} dibuka kembali oleh Admin.", "warning", "assessment_assignments", aid)
+    fresh = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
+    await _enrich_assignments([fresh])
+    return fresh
+
+@api.post("/assignments/{aid}/force-final")
+async def force_final_assignment(aid: str, body: AdminReasonIn, user=Depends(require_roles("admin"))):
+    reason = (body.reason or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Alasan Force Final wajib diisi")
+    assignment = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment tidak ditemukan")
+    if assignment.get("status") in ASSIGNMENT_FINAL:
+        raise HTTPException(status_code=400, detail="Assignment sudah Final")
+    await _assert_force_final_ready(aid, assignment)
+    now = now_iso()
+    upd = {
+        "status": "Final",
+        "force_final": True,
+        "force_final_reason": reason,
+        "signatures_need_update": False,
+        "finalized_at": now,
+        "updated_at": now,
+    }
+    log_doc = {
+        "id": str(uuid.uuid4()),
+        "assignment_id": aid,
+        "forced_by": user["id"],
+        "reason": reason,
+        "previous_status": assignment.get("status"),
+        "new_status": "Final",
+        "forced_at": now,
+        "notes": body.notes or "",
+    }
+    await db.assessment_assignments.update_one({"id": aid}, {"$set": upd})
+    await db.force_final_logs.insert_one(log_doc)
+    await audit(user["id"], "force_final", "assessment_assignments", aid, {"status": assignment.get("status")}, {**upd, "reason": reason})
+    await notify_user(assignment.get("assessor_user_id"), "Force Final", "Assignment penilaian telah difinalisasi oleh Admin.", "success", "assessment_assignments", aid)
+    await notify_user(await _teacher_user_id(assignment.get("teacher_id")), "Penilaian Final", "Penilaian Anda telah difinalisasi oleh Admin.", "success", "assessment_assignments", aid)
+    await notify_admins("Force Final dilakukan", f"Assignment {aid} difinalisasi oleh Admin.", "success", "assessment_assignments", aid)
+    fresh = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
+    await _enrich_assignments([fresh])
+    return fresh
+
+@api.delete("/assignments/{aid}/evaluation-followup")
+async def admin_delete_evaluation_followup(aid: str, user=Depends(require_roles("admin"))):
+    assignment = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment tidak ditemukan")
+    if assignment.get("status") in ASSIGNMENT_FINAL:
+        raise HTTPException(status_code=400, detail="Evaluasi & RTL Final tidak dapat dihapus pada tahap ini")
+    existing = await db.evaluation_followups.find_one({"assignment_id": aid})
+    if not existing or existing.get("is_deleted"):
+        raise HTTPException(status_code=404, detail="Evaluasi & RTL aktif tidak ditemukan")
+    upd = {
+        "is_deleted": True,
+        "deleted_by": user["id"],
+        "deleted_at": now_iso(),
+        "updated_by": user["id"],
+        "updated_at": now_iso(),
+    }
+    await db.evaluation_followups.update_one({"assignment_id": aid}, {"$set": upd})
+    await audit(user["id"], "delete", "evaluation_followups", existing["id"], clean(existing), upd)
+    return {"ok": True}
+
+@api.post("/assignments/{aid}/evaluation-followup/restore")
+async def admin_restore_evaluation_followup(aid: str, user=Depends(require_roles("admin"))):
+    assignment = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment tidak ditemukan")
+    if assignment.get("status") in ASSIGNMENT_FINAL:
+        raise HTTPException(status_code=400, detail="Evaluasi & RTL Final tidak dapat direstore pada tahap ini")
+    existing = await db.evaluation_followups.find_one({"assignment_id": aid})
+    if not existing or not existing.get("is_deleted"):
+        raise HTTPException(status_code=404, detail="Evaluasi & RTL terhapus tidak ditemukan")
+    upd = {
+        "is_deleted": False,
+        "deleted_by": None,
+        "deleted_at": None,
+        "restored_by": user["id"],
+        "restored_at": now_iso(),
+        "updated_by": user["id"],
+        "updated_at": now_iso(),
+    }
+    await db.evaluation_followups.update_one({"assignment_id": aid}, {"$set": upd})
+    await audit(user["id"], "restore", "evaluation_followups", existing["id"], clean(existing), upd)
+    return {"ok": True}
+
+@api.post("/assignments/{aid}/digital-signature")
+async def save_digital_signature(aid: str, body: DigitalSignatureIn, user=Depends(get_current_user)):
+    assignment = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment tidak ditemukan")
+    permission = await _signature_permission(assignment, user)
+    if not permission["can_view"] or not permission["can_sign"]:
+        raise HTTPException(status_code=403, detail="Anda tidak berhak menandatangani report ini")
+    if assignment.get("status") in ASSIGNMENT_FINAL:
+        raise HTTPException(status_code=400, detail="Tanda tangan sudah terkunci setelah assignment Final")
+    image = (body.signature_image or "").strip()
+    if not image.startswith("data:image/"):
+        raise HTTPException(status_code=400, detail="Format tanda tangan harus berupa gambar/base64")
+    teacher = await db.teachers.find_one({"id": assignment.get("teacher_id")}, {"_id": 0})
+    now = now_iso()
+    existing = await db.digital_signatures.find_one({"assignment_id": aid, "user_id": user["id"]})
+    doc = {
+        "assignment_id": aid,
+        "teacher_id": assignment.get("teacher_id"),
+        "assessment_period_id": assignment.get("assessment_period_id"),
+        "user_id": user["id"],
+        "signer_name": user.get("name"),
+        "signer_role": user.get("role"),
+        "signature_image": image,
+        "signature_status": "Sudah Ditandatangani",
+        "signed_at": now,
+        "updated_at": now,
+    }
+    if existing:
+        await db.digital_signatures.update_one({"id": existing["id"]}, {"$set": doc})
+        await audit(user["id"], "update_signature", "digital_signatures", existing["id"], clean(existing), doc)
+        doc["id"] = existing["id"]
+        doc["created_at"] = existing.get("created_at")
+    else:
+        doc.update({"id": str(uuid.uuid4()), "created_at": now})
+        await db.digital_signatures.insert_one(doc)
+        await audit(user["id"], "create_signature", "digital_signatures", doc["id"], None, {**doc, "signature_image": "[image]"})
+    doc.pop("_id", None)
+    return doc
+
+@api.get("/assignments/{aid}/digital-signatures")
+async def list_digital_signatures(aid: str, user=Depends(get_current_user)):
+    assignment = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment tidak ditemukan")
+    permission = await _signature_permission(assignment, user)
+    if not permission["can_view"]:
+        raise HTTPException(status_code=403, detail="Anda tidak berhak melihat tanda tangan report ini")
+    return await db.digital_signatures.find({"assignment_id": aid}, {"_id": 0}).sort("signed_at", 1).to_list(20)
+
+@api.get("/reports")
+async def list_reports(request: Request, user=Depends(get_current_user)):
+    params = request.query_params
+    query = await _report_scope_for_role(user)
+    query["status"] = {"$ne": "Belum Dimulai"}
+    filters = {
+        "period_id": "assessment_period_id",
+        "school_id": "school_id",
+        "teacher_id": "teacher_id",
+        "assessor_user_id": "assessor_user_id",
+        "role": "assessor_role",
+        "status": "status",
+    }
+    for param, field in filters.items():
+        value = params.get(param)
+        if value and value != "semua":
+            if field == "status":
+                query["status"] = value
+            else:
+                query[field] = value
+    assignments = await db.assessment_assignments.find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    await _enrich_assignments(assignments)
+    assignment_ids = [a["id"] for a in assignments]
+    evaluations = {
+        e["assignment_id"]: e
+        async for e in db.evaluation_followups.find({"assignment_id": {"$in": assignment_ids}, "is_deleted": {"$ne": True}}, {"_id": 0})
+    } if assignment_ids else {}
+    status_rtl = params.get("status_rtl")
+    rows = []
+    for assignment in assignments:
+        evaluation = evaluations.get(assignment["id"])
+        if status_rtl and status_rtl != "semua":
+            if not evaluation or evaluation.get("status_rtl") != status_rtl:
+                continue
+        period, year, semester = await _period_detail(assignment.get("assessment_period_id"))
+        rows.append({
+            "assignment_id": assignment["id"],
+            "teacher_id": assignment.get("teacher_id"),
+            "teacher_name": assignment.get("teacher_name"),
+            "teacher_nip": assignment.get("teacher_nip"),
+            "school_id": assignment.get("school_id"),
+            "school_name": assignment.get("school_name"),
+            "assessment_period_id": assignment.get("assessment_period_id"),
+            "period_name": assignment.get("period_name"),
+            "academic_year_id": (year or {}).get("id"),
+            "academic_year_name": (year or {}).get("year_name"),
+            "semester_id": (semester or {}).get("id"),
+            "semester_name": (semester or {}).get("semester_name"),
+            "assessor_user_id": assignment.get("assessor_user_id"),
+            "assessor_name": assignment.get("assessor_name"),
+            "assessor_role": assignment.get("assessor_role"),
+            "status": assignment.get("status"),
+            "observation_date": assignment.get("observation_date"),
+            "final_percentage": assignment.get("final_percentage"),
+            "status_rtl": (evaluation or {}).get("status_rtl"),
+            "has_evaluation": bool(evaluation),
+            "evaluation_complete": _evaluation_is_complete(evaluation),
+        })
+    return rows
+
+@api.get("/reports/{aid}")
+async def get_report_detail(aid: str, user=Depends(get_current_user)):
+    assignment = await _assignment_for_report(aid, user)
+    await audit(user["id"], "view_report", "assessment_reports", aid, None, {"assignment_id": aid})
+    return await _report_payload(assignment)
+
+@api.post("/reports/{aid}/export-log")
+async def log_report_export(aid: str, user=Depends(get_current_user)):
+    assignment = await _assignment_for_report(aid, user)
+    payload = await _report_payload(assignment)
+    if not payload.get("export_ready"):
+        raise HTTPException(status_code=400, detail=EXPORT_INCOMPLETE_MESSAGE)
+    await audit(user["id"], "export_pdf", "assessment_reports", aid, None, {"assignment_id": aid})
+    return {"ok": True}
+
+@api.post("/assignments/{aid}/teacher-approve")
+async def teacher_approve_assignment(aid: str, user=Depends(get_current_user)):
+    assignment = await _teacher_review_assignment(aid, user)
+    if assignment.get("status") != "Menunggu Review Guru":
+        raise HTTPException(status_code=400, detail="Guru hanya dapat menyetujui saat status Menunggu Review Guru")
+    if _assignment_review_complete(assignment):
+        raise HTTPException(status_code=400, detail="Review Guru untuk assignment ini sudah selesai")
+    await _assert_signature(aid, user["id"], "guru")
+    now = now_iso()
+    final_ready = False
+    try:
+        await _assert_evaluation_complete_for_final(aid)
+        await _assert_signature(aid, assignment["assessor_user_id"])
+        final_ready = True
+    except HTTPException:
+        final_ready = False
+    upd = {
+        "teacher_review_completed": True,
+        "teacher_review_status": "Disetujui Guru",
+        "teacher_approved_at": now,
+        "updated_at": now,
+    }
+    if final_ready:
+        upd.update({"status": "Final", "finalized_at": now})
+    await db.assessment_assignments.update_one({"id": aid}, {"$set": upd})
+    await audit(user["id"], "teacher_approve", "assessment_assignments", aid, {"status": assignment.get("status")}, upd)
+    if final_ready:
+        await notify_user(
+            assignment.get("assessor_user_id"),
+            "Guru menyetujui penilaian",
+            "Guru telah menyetujui hasil penilaian. Assignment menjadi Final.",
+            "success",
+            "assessment_assignments",
+            aid,
+        )
+        await notify_user(user["id"], "Penilaian Final", "Penilaian Anda telah menjadi Final.", "success", "assessment_assignments", aid)
+    else:
+        await notify_user(
+            assignment.get("assessor_user_id"),
+            "Guru menyetujui penilaian",
+            "Review Guru selesai. Lengkapi Evaluasi & RTL sebelum finalisasi.",
+            "info",
+            "assessment_assignments",
+            aid,
+        )
+        await notify_user(user["id"], "Penilaian disetujui", "Persetujuan Anda sudah tercatat.", "success", "assessment_assignments", aid)
+    fresh = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
+    await _enrich_assignments([fresh])
+    return await _assessment_form_payload(fresh)
+
+@api.post("/assignments/{aid}/teacher-feedback")
+async def teacher_feedback_assignment(aid: str, body: TeacherFeedbackIn, user=Depends(get_current_user)):
+    assignment = await _teacher_review_assignment(aid, user)
+    if assignment.get("status") != "Menunggu Review Guru":
+        raise HTTPException(status_code=400, detail="Feedback hanya dapat diberikan saat status Menunggu Review Guru")
+    if _assignment_review_complete(assignment):
+        raise HTTPException(status_code=400, detail="Review Guru untuk assignment ini sudah selesai")
+    feedback_text = (body.feedback_text or "").strip()
+    if not feedback_text:
+        raise HTTPException(status_code=400, detail="Feedback tidak boleh kosong")
+    feedback_count = int(assignment.get("feedback_count") or 0)
+    if feedback_count >= 2:
+        raise HTTPException(status_code=400, detail="Feedback maksimal 2 kali untuk setiap assignment")
+    next_round = feedback_count + 1
+    now = now_iso()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "assignment_id": assignment["id"],
+        "teacher_id": assignment["teacher_id"],
+        "assessment_period_id": assignment["assessment_period_id"],
+        "assessor_user_id": assignment["assessor_user_id"],
+        "feedback_text": feedback_text,
+        "feedback_round": next_round,
+        "status": "Submitted",
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.teacher_assessment_feedbacks.insert_one(doc)
+    upd = {
+        "status": "Feedback dari Guru",
+        "feedback_count": next_round,
+        "teacher_review_status": "Feedback dari Guru",
+        "teacher_review_completed": False,
+        "updated_at": now,
+    }
+    await db.assessment_assignments.update_one({"id": aid}, {"$set": upd})
+    await audit(user["id"], "teacher_feedback", "teacher_assessment_feedbacks", doc["id"], None, doc)
+    await audit(user["id"], "feedback_from_teacher", "assessment_assignments", aid, {"status": assignment.get("status"), "feedback_count": feedback_count}, upd)
+    await notify_user(
+        assignment.get("assessor_user_id"),
+        f"Feedback Guru ronde {next_round}",
+        "Guru memberi feedback untuk hasil penilaian.",
+        "warning",
+        "teacher_assessment_feedbacks",
+        doc["id"],
+    )
+    fresh = await db.assessment_assignments.find_one({"id": aid}, {"_id": 0})
+    await _enrich_assignments([fresh])
+    return await _assessment_form_payload(fresh)
 
 
 # ---------------------------------------------------------------------------
@@ -1256,9 +2760,13 @@ async def start_assignment(aid: str, user=Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 app.include_router(api)
 
+frontend_url = os.environ.get("FRONTEND_URL", "").strip()
+cors_origins = os.environ.get("CORS_ORIGINS", "").strip()
+allow_origins = cors_origins.split(",") if cors_origins else ([frontend_url] if frontend_url else ["*"])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=allow_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1380,7 +2888,7 @@ async def seed_data():
     guru_data = [
         ("Ahmad Hidayat, S.Pd.", "guru1@pjok-kbb.id", "Guru@123", "198505102010011005", sd1_id, "PNS"),
         ("Dewi Lestari, S.Pd.", "guru2@pjok-kbb.id", "Guru@123", "199001152015032008", sd1_id, "PNS"),
-        ("Rudi Hartono, S.Pd.", "guru3@pjok-kbb.id", "Guru@123", "198812202018011003", sd2_id, "PPPK"),
+        ("Rudi Hartono, S.Pd.", "guru3@pjok-kbb.id", "Guru@123", "198812202018011003", sd2_id, "Non PNS"),
     ]
     for name, email, pw, nip, sid, emp in guru_data:
         uid = str(uuid.uuid4())
@@ -1416,6 +2924,29 @@ async def on_startup():
     await db.assessment_assignments.create_index(
         [("teacher_id", 1), ("assessment_period_id", 1), ("assessor_role", 1)],
         unique=True,
+    )
+    await db.assessment_scores.create_index(
+        [("assignment_id", 1), ("aspect_id", 1)],
+        unique=True,
+    )
+    await db.teacher_proposed_aspects.create_index(
+        [("teacher_id", 1), ("assessment_period_id", 1), ("aspect_name_normalized", 1)],
+        unique=True,
+    )
+    await db.teacher_proposed_aspects.create_index([("assignment_id", 1), ("status", 1)])
+    await db.teacher_assessment_feedbacks.create_index(
+        [("assignment_id", 1), ("feedback_round", 1)],
+        unique=True,
+    )
+    await db.evaluation_followups.create_index("assignment_id", unique=True)
+    await db.digital_signatures.create_index([("assignment_id", 1), ("user_id", 1)], unique=True)
+    await db.audit_logs.create_index([("created_at", -1), ("user_id", 1), ("action", 1), ("table_name", 1)])
+    await db.notifications.create_index([("user_id", 1), ("is_read", 1), ("created_at", -1)])
+    await db.emergency_unlock_logs.create_index([("assignment_id", 1), ("unlocked_at", -1)])
+    await db.force_final_logs.create_index([("assignment_id", 1), ("forced_at", -1)])
+    await db.teachers.update_many(
+        {"employment_status": {"$nin": ["PNS", "Non PNS"]}},
+        {"$set": {"employment_status": "Non PNS", "updated_at": now_iso()}},
     )
     await seed_permissions()
     await seed_data()
@@ -1463,6 +2994,7 @@ async def seed_phase3():
             "observation_date": "",
             "assignment_type": "Penilaian Utama",
             "status": "Belum Dimulai",
+            "feedback_count": 0,
             "notes": "Penilaian rutin oleh Kepala Sekolah.",
             "created_by": kpsk_user["id"],
             "created_at": now_iso(),
@@ -1486,6 +3018,7 @@ async def seed_phase3():
                 "observation_date": "",
                 "assignment_type": "Penilaian Utama",
                 "status": "Belum Dimulai",
+                "feedback_count": 0,
                 "notes": "Penilaian oleh pengawas wilayah.",
                 "created_by": pengawas["id"],
                 "created_at": now_iso(),

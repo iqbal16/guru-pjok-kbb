@@ -1,18 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ClipboardCheck, CalendarCheck2, User, School, Clock, AlertCircle } from "lucide-react";
 
 const STATUS_TONE = {
   "Belum Dimulai": "bg-slate-100 text-slate-700",
   Draft: "bg-amber-100 text-amber-800",
+  "Menunggu Review Guru": "bg-blue-100 text-blue-700",
+  "Feedback dari Guru": "bg-orange-100 text-orange-700",
+  "Draft Revisi": "bg-purple-100 text-purple-700",
   Final: "bg-emerald-100 text-emerald-700",
 };
 
 const ROLES = ["Kepala Sekolah", "Pengawas"];
+const REVIEW_VISIBLE = ["Menunggu Review Guru", "Feedback dari Guru", "Draft Revisi", "Final"];
 
 export default function MyAssessment() {
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -53,7 +60,7 @@ export default function MyAssessment() {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {ROLES.map((role) => (
-            <AssessmentCard key={role} role={role} period={period} assignment={assignmentsByRole[role]} />
+            <AssessmentCard key={role} role={role} period={period} assignment={assignmentsByRole[role]} onOpen={(id) => navigate(`/penilaian-saya/${id}`)} />
           ))}
         </div>
       )}
@@ -61,7 +68,7 @@ export default function MyAssessment() {
   );
 }
 
-function AssessmentCard({ role, period, assignment }) {
+function AssessmentCard({ role, period, assignment, onOpen }) {
   const title = role === "Pengawas" ? "Penilaian Pengawas" : "Penilaian Kepala Sekolah";
   if (!assignment) {
     return (
@@ -95,6 +102,8 @@ function AssessmentCard({ role, period, assignment }) {
           <DetailRow icon={School} label="Sekolah" value={assignment.school_name || "-"} />
           <DetailRow icon={Clock} label="Tanggal Observasi" value={assignment.observation_date || "Belum dijadwalkan"} />
           <DetailRow icon={ClipboardCheck} label="Jenis Penilaian" value={title} />
+          <DetailRow icon={ClipboardCheck} label="Nilai Akhir" value={`${Number(assignment.final_percentage || 0).toFixed(2)}%`} />
+          <DetailRow icon={ClipboardCheck} label="Feedback" value={`${assignment.feedback_count || 0} dari 2`} />
         </div>
 
         {assignment.notes && (
@@ -102,6 +111,12 @@ function AssessmentCard({ role, period, assignment }) {
             <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-1">Catatan Penilai</div>
             <div className="text-sm text-slate-800">{assignment.notes}</div>
           </div>
+        )}
+
+        {REVIEW_VISIBLE.includes(assignment.status) && (
+          <Button onClick={() => onOpen(assignment.id)} className="w-full bg-emerald-700 hover:bg-emerald-800" data-testid="my-assessment-detail-button">
+            Lihat Detail
+          </Button>
         )}
       </div>
     </Card>

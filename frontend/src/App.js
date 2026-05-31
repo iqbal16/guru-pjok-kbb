@@ -20,6 +20,13 @@ import ObservationCategories from "@/pages/ObservationCategories";
 import ObservationAspects from "@/pages/ObservationAspects";
 import Assignments from "@/pages/Assignments";
 import MyAssessment from "@/pages/MyAssessment";
+import AssessmentForm from "@/pages/AssessmentForm";
+import ProposedAspects from "@/pages/ProposedAspects";
+import TeacherAssessmentReview from "@/pages/TeacherAssessmentReview";
+import EvaluationFollowupsAdmin from "@/pages/EvaluationFollowupsAdmin";
+import Reports from "@/pages/Reports";
+import AuditLog from "@/pages/AuditLog";
+import Notifications from "@/pages/Notifications";
 
 function App() {
   return (
@@ -43,7 +50,15 @@ function App() {
               <Route path="/komponen-observasi" element={<ProtectedRoute roles={["admin", "pengawas", "kepala_sekolah", "guru"]}><ObservationCategories /></ProtectedRoute>} />
               <Route path="/aspek-penilaian" element={<ProtectedRoute roles={["admin"]}><ObservationAspects /></ProtectedRoute>} />
               <Route path="/assignments" element={<ProtectedRoute roles={["admin", "pengawas", "kepala_sekolah"]}><Assignments /></ProtectedRoute>} />
+              <Route path="/assignments/:assignmentId/penilaian" element={<ProtectedRoute roles={["admin", "pengawas", "kepala_sekolah"]}><AssessmentForm /></ProtectedRoute>} />
+              <Route path="/evaluasi-rtl" element={<ProtectedRoute roles={["admin"]}><EvaluationFollowupsAdmin /></ProtectedRoute>} />
+              <Route path="/reports" element={<ProtectedRoute roles={["admin", "pengawas", "kepala_sekolah", "guru"]}><Reports /></ProtectedRoute>} />
+              <Route path="/notifikasi" element={<ProtectedRoute roles={["admin", "pengawas", "kepala_sekolah", "guru"]}><Notifications /></ProtectedRoute>} />
+              <Route path="/audit-log" element={<ProtectedRoute roles={["admin"]}><AuditLog /></ProtectedRoute>} />
               <Route path="/penilaian-saya" element={<ProtectedRoute roles={["guru"]}><MyAssessment /></ProtectedRoute>} />
+              <Route path="/penilaian-saya/:assignmentId" element={<ProtectedRoute roles={["guru"]}><TeacherAssessmentReview /></ProtectedRoute>} />
+              <Route path="/usulan-aspek-observasi" element={<ProtectedRoute roles={["guru"]}><ProposedAspects /></ProtectedRoute>} />
+              <Route path="/review-usulan-aspek" element={<ProtectedRoute roles={["admin", "pengawas", "kepala_sekolah"]}><ProposedAspects /></ProtectedRoute>} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

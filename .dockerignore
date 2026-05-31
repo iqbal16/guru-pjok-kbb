@@ -1,0 +1,16 @@
+node_modules
+frontend/node_modules
+frontend/build
+tests
+frontend/tests
+test-results
+playwright-report
+traces
+videos
+screenshots
+.env.test
+frontend/.env.test
+.env
+.env.*
+backend/.env
+frontend/.env

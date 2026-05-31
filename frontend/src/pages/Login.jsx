@@ -52,14 +52,14 @@ export default function Login() {
               <Trophy className="w-6 h-6 text-white" strokeWidth={2.2} />
             </div>
             <div>
-              <div className="font-heading text-xl font-bold text-slate-900 leading-tight">PJOK KBB</div>
+              <div className="font-heading text-xl font-bold text-slate-900 leading-tight">Penilaian Kinerja Guru PJOK SD KBB</div>
               <div className="text-xs text-slate-500">Kabupaten Bandung Barat</div>
             </div>
           </div>
 
           <div className="mb-8">
             <div className="text-xs uppercase tracking-[0.2em] font-bold text-emerald-600 mb-3">
-              Portal Penilaian Kinerja
+              Aplikasi Penilaian Kinerja Guru PJOK SD Kabupaten Bandung Barat
             </div>
             <h1 className="font-heading text-4xl sm:text-5xl font-bold tracking-tight text-slate-900 mb-3">
               Selamat datang.
@@ -91,7 +91,7 @@ export default function Login() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
+                placeholder="********"
                 required
                 autoComplete="current-password"
                 className="h-11 focus-visible:ring-emerald-500"
@@ -134,7 +134,7 @@ export default function Login() {
           className="absolute inset-0 opacity-90"
           style={{
             backgroundImage:
-              "url('https://static.prod-images.emergentagent.com/jobs/48dbf92f-611d-4c06-bc9d-46b42ac8c8a3/images/63322c1b7ed596b392d9cb4284cd7e53ec4f698a643f6dd84db2c67b0a0b80f0.png')",
+              "url('https://images.pexels.com/photos/5212345/pexels-photo-5212345.jpeg')",
             backgroundSize: "cover",
             backgroundPosition: "center",
           }}
@@ -142,13 +142,13 @@ export default function Login() {
         <div className="absolute inset-0 bg-gradient-to-br from-emerald-950/80 via-emerald-900/60 to-orange-900/40" />
         <div className="relative z-10 flex flex-col justify-end p-12 text-white">
           <div className="text-xs uppercase tracking-[0.25em] font-bold text-orange-300 mb-3">
-            Dinas Pendidikan • KBB
+            Dinas Pendidikan - KBB
           </div>
           <h2 className="font-heading text-4xl font-bold leading-tight mb-4">
             Mendorong mutu pendidikan jasmani di setiap SD se-Kabupaten Bandung Barat.
           </h2>
           <p className="text-emerald-100/90 max-w-md">
-            Satu platform untuk pengawas, kepala sekolah, dan guru — terhubung, terstandar, dan transparan.
+            Satu platform untuk pengawas, kepala sekolah, dan guru - terhubung, terstandar, dan transparan.
           </p>
         </div>
       </div>

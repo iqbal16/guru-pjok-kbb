@@ -40,6 +40,7 @@ export default function Teachers() {
   useEffect(() => { load(); }, []);
 
   const schoolMap = useMemo(() => Object.fromEntries(schools.map((s) => [s.id, s])), [schools]);
+  const employmentLabel = (value) => (value === "PNS" ? "PNS" : "Non PNS");
   const filtered = useMemo(() => items.filter((t) => {
     if (filterSchool !== "semua" && t.school_id !== filterSchool) return false;
     if (!search) return true;
@@ -57,7 +58,7 @@ export default function Teachers() {
     setForm({
       name: t.name, nip: t.nip || "", school_id: t.school_id || "none",
       subject: t.subject || "PJOK", grade_level: t.grade_level || "SD",
-      employment_status: t.employment_status || "PNS", status: t.status,
+      employment_status: employmentLabel(t.employment_status), status: t.status,
     });
     setOpen(true);
   };
@@ -107,14 +108,14 @@ export default function Teachers() {
         )}
       </div>
 
-      <Card className="p-6">
+      <Card className="p-4 sm:p-6">
         <div className="flex items-center gap-3 mb-4 flex-wrap">
           <div className="relative flex-1 min-w-[200px]">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <Input placeholder="Cari nama atau NIP..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" data-testid="teachers-search" />
           </div>
           <Select value={filterSchool} onValueChange={setFilterSchool}>
-            <SelectTrigger className="w-[220px]"><SelectValue placeholder="Filter Sekolah" /></SelectTrigger>
+            <SelectTrigger className="w-full sm:w-[220px]"><SelectValue placeholder="Filter Sekolah" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="semua">Semua Sekolah</SelectItem>
               {schools.map((s) => <SelectItem key={s.id} value={s.id}>{s.school_name}</SelectItem>)}
@@ -128,7 +129,7 @@ export default function Teachers() {
               <div className="text-slate-600 font-medium">Data belum tersedia</div>
             </div>
           ) : (
-            <div className="border rounded-lg overflow-hidden">
+            <div className="rounded-lg border border-slate-200 overflow-x-auto">
               <Table>
                 <TableHeader className="bg-slate-50">
                   <TableRow>
@@ -144,13 +145,13 @@ export default function Teachers() {
                 <TableBody>
                   {filtered.map((t) => (
                     <TableRow key={t.id} data-testid={`teacher-row-${t.id}`}>
-                      <TableCell className="font-medium">{t.name}</TableCell>
+                      <TableCell className="font-medium min-w-[180px]">{t.name}</TableCell>
                       <TableCell className="font-mono text-sm text-slate-600">{t.nip || "-"}</TableCell>
-                      <TableCell className="text-slate-600">{schoolMap[t.school_id]?.school_name || "-"}</TableCell>
+                      <TableCell className="text-slate-600 min-w-[220px]">{schoolMap[t.school_id]?.school_name || "-"}</TableCell>
                       <TableCell>
                         <Badge className="bg-orange-100 text-orange-700 hover:bg-orange-100 border-0">{t.subject}</Badge>
                       </TableCell>
-                      <TableCell className="text-slate-600">{t.employment_status}</TableCell>
+                      <TableCell className="text-slate-600">{employmentLabel(t.employment_status)}</TableCell>
                       <TableCell>
                         <Badge className={t.status === "aktif" ? "bg-green-100 text-green-700 hover:bg-green-100 border-0" : "bg-slate-200 text-slate-700 hover:bg-slate-200 border-0"}>
                           {t.status === "aktif" ? "Aktif" : "Nonaktif"}
@@ -171,7 +172,7 @@ export default function Teachers() {
       </Card>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editing ? "Ubah Guru" : "Tambah Guru"}</DialogTitle>
             <DialogDescription>Lengkapi data guru PJOK.</DialogDescription>
@@ -181,7 +182,7 @@ export default function Teachers() {
               <Label>Nama Guru</Label>
               <Input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="teacher-name-input" />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>NIP</Label>
                 <Input value={form.nip} onChange={(e) => setForm({ ...form, nip: e.target.value })} />
@@ -192,8 +193,7 @@ export default function Teachers() {
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="PNS">PNS</SelectItem>
-                    <SelectItem value="PPPK">PPPK</SelectItem>
-                    <SelectItem value="Honorer">Honorer</SelectItem>
+                    <SelectItem value="Non PNS">Non PNS</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -203,12 +203,12 @@ export default function Teachers() {
               <Select value={form.school_id} onValueChange={(v) => setForm({ ...form, school_id: v })}>
                 <SelectTrigger><SelectValue placeholder="Pilih sekolah" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">— Belum ditempatkan —</SelectItem>
+                  <SelectItem value="none">Belum ditempatkan</SelectItem>
                   {schools.map((s) => <SelectItem key={s.id} value={s.id}>{s.school_name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Mata Pelajaran</Label>
                 <Input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} />
