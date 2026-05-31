@@ -1,8 +1,8 @@
 {
   "framework": "create-react-app",
-  "buildCommand": "npm run build",
+  "buildCommand": "yarn build",
   "outputDirectory": "build",
-  "installCommand": "npm install",
+  "installCommand": "yarn install --frozen-lockfile",
   "rewrites": [
     {
       "source": "/(.*)",
