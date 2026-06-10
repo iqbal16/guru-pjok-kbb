@@ -9,10 +9,13 @@ import uuid
 import logging
 import bcrypt
 import jwt
+import mimetypes
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Literal
 
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, status
+import boto3
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, status, UploadFile, File, Form, Query
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -37,6 +40,26 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 Role = Literal["admin", "pengawas", "kepala_sekolah", "guru"]
+EVIDENCE_CATEGORIES = {"document", "video"}
+DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm"}
+DOCUMENT_MIME_TYPES = {
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+VIDEO_MIME_TYPES = {"video/mp4", "video/quicktime", "video/webm"}
+MAX_DOCUMENT_SIZE_MB = int(os.environ.get("MAX_DOCUMENT_SIZE_MB", "10"))
+MAX_VIDEO_SIZE_MB = int(os.environ.get("MAX_VIDEO_SIZE_MB", "50"))
+STORAGE_PROVIDER = (os.environ.get("STORAGE_PROVIDER") or "local").lower()
+STORAGE_BUCKET = os.environ.get("STORAGE_BUCKET", "")
+STORAGE_ENDPOINT = os.environ.get("STORAGE_ENDPOINT", "")
+STORAGE_ACCESS_KEY = os.environ.get("STORAGE_ACCESS_KEY", "")
+STORAGE_SECRET_KEY = os.environ.get("STORAGE_SECRET_KEY", "")
+STORAGE_REGION = os.environ.get("STORAGE_REGION", "auto")
+LOCAL_STORAGE_DIR = ROOT_DIR / "storage_uploads"
 MENU_NAMES = [
     "dashboard",
     "user_management",
@@ -144,6 +167,220 @@ def json_safe(value):
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     return str(value)
+
+def _safe_extension(filename: str) -> str:
+    return Path(filename or "").suffix.lower()
+
+def _safe_original_filename(filename: str) -> str:
+    name = Path(filename or "file").name.replace("\x00", "").strip()
+    return name[:180] or "file"
+
+def _format_mb(size_bytes: int) -> str:
+    return f"{size_bytes / (1024 * 1024):.2f} MB"
+
+def _storage_key(teacher_id: str, period_id: str, extension: str) -> str:
+    return f"teacher-evidence/{period_id}/{teacher_id}/{uuid.uuid4().hex}{extension}"
+
+def _s3_client():
+    if not STORAGE_BUCKET or not STORAGE_ACCESS_KEY or not STORAGE_SECRET_KEY:
+        raise HTTPException(status_code=500, detail="Storage bukti pendukung belum dikonfigurasi")
+    return boto3.client(
+        "s3",
+        endpoint_url=STORAGE_ENDPOINT or None,
+        aws_access_key_id=STORAGE_ACCESS_KEY,
+        aws_secret_access_key=STORAGE_SECRET_KEY,
+        region_name=STORAGE_REGION,
+    )
+
+async def _put_storage_object(key: str, body: bytes, mime_type: str):
+    if STORAGE_PROVIDER in ("s3", "r2", "minio"):
+        _s3_client().put_object(Bucket=STORAGE_BUCKET, Key=key, Body=body, ContentType=mime_type)
+        return
+    if STORAGE_PROVIDER == "local":
+        if os.environ.get("RENDER"):
+            raise HTTPException(status_code=500, detail="Storage lokal tidak boleh digunakan pada deployment Render. Konfigurasikan storage S3-compatible.")
+        target = LOCAL_STORAGE_DIR / key
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(body)
+        return
+    raise HTTPException(status_code=500, detail="Storage provider bukti pendukung tidak didukung")
+
+def _storage_url_or_path(key: str, disposition: str = "attachment"):
+    if STORAGE_PROVIDER in ("s3", "r2", "minio"):
+        return _s3_client().generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": STORAGE_BUCKET,
+                "Key": key,
+                "ResponseContentDisposition": disposition,
+            },
+            ExpiresIn=300,
+        )
+    if STORAGE_PROVIDER == "local":
+        path = LOCAL_STORAGE_DIR / key
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="File bukti pendukung tidak ditemukan di storage")
+        return path
+    raise HTTPException(status_code=500, detail="Storage provider bukti pendukung tidak didukung")
+
+def _validate_evidence_file(file_category: str, original_filename: str, mime_type: str, size_bytes: int):
+    category = (file_category or "").strip().lower()
+    if category not in EVIDENCE_CATEGORIES:
+        raise HTTPException(status_code=400, detail="Jenis file bukti pendukung tidak valid")
+    extension = _safe_extension(original_filename)
+    normalized_mime = (mime_type or mimetypes.guess_type(original_filename)[0] or "").lower()
+    if category == "document":
+        if extension not in DOCUMENT_EXTENSIONS or normalized_mime not in DOCUMENT_MIME_TYPES:
+            raise HTTPException(status_code=415, detail="Format dokumen tidak didukung. Gunakan PDF, Word, atau Excel.")
+        max_bytes = MAX_DOCUMENT_SIZE_MB * 1024 * 1024
+        if size_bytes > max_bytes:
+            raise HTTPException(status_code=413, detail="Ukuran dokumen melebihi batas maksimum yang diizinkan.")
+    if category == "video":
+        if extension not in VIDEO_EXTENSIONS or normalized_mime not in VIDEO_MIME_TYPES:
+            raise HTTPException(status_code=415, detail="Format video tidak didukung. Gunakan MP4, MOV, atau WEBM.")
+        max_bytes = MAX_VIDEO_SIZE_MB * 1024 * 1024
+        if size_bytes > max_bytes:
+            raise HTTPException(status_code=413, detail="Ukuran video maksimal 50 MB.")
+    return extension, normalized_mime
+
+async def _evidence_files(teacher_id: str, period_id: str):
+    return await db.teacher_evidence_uploads.find({
+        "teacher_id": teacher_id,
+        "assessment_period_id": period_id,
+        "status": {"$in": ["active", "locked"]},
+        "deleted_at": None,
+    }, {"_id": 0}).sort("uploaded_at", -1).to_list(500)
+
+async def _evidence_has_started_assignment(teacher_id: str, period_id: str):
+    started = await db.assessment_assignments.find_one({
+        "teacher_id": teacher_id,
+        "assessment_period_id": period_id,
+        "status": {"$nin": ["Belum Dimulai"]},
+    }, {"_id": 0, "id": 1})
+    return started
+
+async def _evidence_summary(teacher_id: Optional[str], period: Optional[dict], include_files: bool = True):
+    if not teacher_id or not period:
+        return {
+            "document_count": 0,
+            "video_count": 0,
+            "readiness_status": "incomplete",
+            "readiness_label": "Belum Lengkap",
+            "locked": False,
+            "missing": ["Belum ada semester penilaian aktif."],
+            "files": [] if include_files else None,
+            "max_document_size_mb": MAX_DOCUMENT_SIZE_MB,
+            "max_video_size_mb": MAX_VIDEO_SIZE_MB,
+        }
+    files = await _evidence_files(teacher_id, period["id"])
+    document_count = sum(1 for f in files if f.get("file_category") == "document")
+    video_count = sum(1 for f in files if f.get("file_category") == "video")
+    missing = []
+    if document_count < 1:
+        missing.append("Dokumen belum tersedia.")
+    if video_count < 1:
+        missing.append("Video belum tersedia.")
+    if not period.get("is_active"):
+        missing.append("Belum ada semester penilaian aktif.")
+    started = await _evidence_has_started_assignment(teacher_id, period["id"])
+    locked = bool(started)
+    ready = not missing
+    status_value = "locked" if locked else ("ready" if ready else "incomplete")
+    label = "Terkunci" if locked else ("Siap Dinilai" if ready else "Belum Lengkap")
+    return {
+        "document_count": document_count,
+        "video_count": video_count,
+        "readiness_status": status_value,
+        "readiness_label": label,
+        "locked": locked,
+        "locked_by_assignment_id": (started or {}).get("id") if locked else None,
+        "missing": missing,
+        "files": files if include_files else None,
+        "max_document_size_mb": MAX_DOCUMENT_SIZE_MB,
+        "max_video_size_mb": MAX_VIDEO_SIZE_MB,
+    }
+
+async def _assert_evidence_ready_for_assignment(assignment: dict):
+    period = await _get_active_period()
+    if not period or period.get("id") != assignment.get("assessment_period_id"):
+        raise HTTPException(status_code=400, detail="Belum ada semester penilaian aktif.")
+    summary = await _evidence_summary(assignment.get("teacher_id"), period, include_files=False)
+    if summary["readiness_status"] not in ("ready", "locked"):
+        raise HTTPException(status_code=400, detail="Penilaian belum dapat dimulai karena Guru belum melengkapi dokumen dan video pendukung.")
+    return summary
+
+async def _lock_evidence_for_assignment(assignment: dict, user_id: Optional[str]):
+    now = now_iso()
+    teacher_id = assignment.get("teacher_id")
+    period_id = assignment.get("assessment_period_id")
+    old_files = await _evidence_files(teacher_id, period_id)
+    await db.teacher_evidence_uploads.update_many(
+        {
+            "teacher_id": teacher_id,
+            "assessment_period_id": period_id,
+            "status": "active",
+            "deleted_at": None,
+        },
+        {"$set": {"status": "locked", "updated_at": now}},
+    )
+    files = await _evidence_files(teacher_id, period_id)
+    await db.teacher_evidence_submissions.update_one(
+        {"teacher_id": teacher_id, "assessment_period_id": period_id},
+        {
+            "$set": {
+                "teacher_id": teacher_id,
+                "assessment_period_id": period_id,
+                "document_count": sum(1 for f in files if f.get("file_category") == "document"),
+                "video_count": sum(1 for f in files if f.get("file_category") == "video"),
+                "readiness_status": "locked",
+                "locked_at": now,
+                "locked_by_assignment_id": assignment.get("id"),
+                "updated_at": now,
+            },
+            "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": now},
+        },
+        upsert=True,
+    )
+    await audit(user_id, "lock_evidence", "teacher_evidence_uploads", assignment.get("id"), old_files, files)
+
+async def _notify_assessors_evidence_ready(teacher: dict, period: dict, user_id: str, previous_status: str, summary: dict):
+    if previous_status == "ready" or summary.get("readiness_status") != "ready":
+        return
+    assignments = await db.assessment_assignments.find({
+        "teacher_id": teacher["id"],
+        "assessment_period_id": period["id"],
+    }, {"_id": 0}).to_list(20)
+    message = f"Bukti pendukung penilaian {teacher.get('name', 'Guru')} untuk semester aktif sudah lengkap dan siap dinilai."
+    notified = set()
+    for assignment in assignments:
+        assessor_id = assignment.get("assessor_user_id")
+        if assessor_id and assessor_id not in notified:
+            await notify_user(assessor_id, "Bukti pendukung siap dinilai", message, "success", "teacher_evidence_uploads", teacher["id"])
+            notified.add(assessor_id)
+    await audit(user_id, "evidence_ready", "teacher_evidence_submissions", teacher["id"], {"readiness_status": previous_status}, summary)
+
+async def _assert_evidence_file_access(file_doc: dict, user: dict):
+    if user["role"] == "admin":
+        return True
+    if user["role"] == "guru":
+        teacher = await _teacher_for_user(user)
+        if teacher and teacher.get("id") == file_doc.get("teacher_id"):
+            return True
+    if user["role"] == "pengawas":
+        exists = await db.assessment_assignments.find_one({
+            "teacher_id": file_doc.get("teacher_id"),
+            "assessment_period_id": file_doc.get("assessment_period_id"),
+            "assessor_user_id": user["id"],
+        }, {"_id": 0, "id": 1})
+        if exists:
+            return True
+    if user["role"] == "kepala_sekolah":
+        principal = await db.principals.find_one({"user_id": user["id"]}, {"_id": 0})
+        if not principal and user.get("linked_profile_id"):
+            principal = await db.principals.find_one({"id": user["linked_profile_id"]}, {"_id": 0})
+        if (principal or {}).get("school_id") == file_doc.get("school_id"):
+            return True
+    raise HTTPException(status_code=403, detail="Anda tidak berhak mengakses bukti pendukung ini")
 
 def normalize_employment_status(value: Optional[str]) -> str:
     return "PNS" if value == "PNS" else "Non PNS"
@@ -699,6 +936,199 @@ async def my_profile(user=Depends(get_current_user)):
         return {"user": user, "principal": prin, "school": school}
     return {"user": user}
 
+# ---------------------------------------------------------------------------
+# Evidence uploads (Guru supporting documents/videos)
+# ---------------------------------------------------------------------------
+@api.get("/evidence/me")
+async def my_evidence(user=Depends(require_roles("guru"))):
+    period = await _get_active_period()
+    teacher = await _teacher_for_user(user)
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Profil guru tidak ditemukan")
+    school = await db.schools.find_one({"id": teacher.get("school_id")}, {"_id": 0})
+    summary = await _evidence_summary(teacher["id"], period, include_files=True)
+    assignments = []
+    if period:
+        assignments = await db.assessment_assignments.find({
+            "teacher_id": teacher["id"],
+            "assessment_period_id": period["id"],
+        }, {"_id": 0}).sort("created_at", 1).to_list(20)
+        await _enrich_assignments(assignments)
+    return {
+        "teacher": teacher,
+        "school": school,
+        "active_period": period,
+        "summary": summary,
+        "assignments": assignments,
+        "storage_provider": STORAGE_PROVIDER,
+    }
+
+@api.post("/evidence/me/upload")
+async def upload_my_evidence(
+    file_category: str = Form(...),
+    upload: UploadFile = File(...),
+    user=Depends(require_roles("guru")),
+):
+    period = await _get_active_period()
+    if not period:
+        raise HTTPException(status_code=400, detail="Belum ada semester penilaian aktif.")
+    teacher = await _teacher_for_user(user)
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Profil guru tidak ditemukan")
+    assignments = await db.assessment_assignments.find({
+        "teacher_id": teacher["id"],
+        "assessment_period_id": period["id"],
+        "status": {"$nin": list(ASSIGNMENT_FINAL)},
+    }, {"_id": 0, "id": 1}).to_list(20)
+    if not assignments:
+        raise HTTPException(status_code=400, detail="Assignment aktif belum tersedia untuk periode ini.")
+    before = await _evidence_summary(teacher["id"], period, include_files=False)
+    if before.get("locked"):
+        raise HTTPException(status_code=400, detail="Bukti pendukung sudah terkunci karena penilaian sudah dimulai.")
+    raw = await upload.read()
+    original = _safe_original_filename(upload.filename)
+    extension, mime_type = _validate_evidence_file(file_category, original, upload.content_type or "", len(raw))
+    key = _storage_key(teacher["id"], period["id"], extension)
+    await _put_storage_object(key, raw, mime_type)
+    now = now_iso()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "teacher_id": teacher["id"],
+        "school_id": teacher.get("school_id"),
+        "assessment_period_id": period["id"],
+        "file_category": file_category.strip().lower(),
+        "original_filename": original,
+        "stored_filename": Path(key).name,
+        "storage_key": key,
+        "mime_type": mime_type,
+        "extension": extension,
+        "size_bytes": len(raw),
+        "storage_provider": STORAGE_PROVIDER,
+        "uploaded_by": user["id"],
+        "uploaded_at": now,
+        "updated_at": now,
+        "status": "active",
+        "deleted_at": None,
+    }
+    await db.teacher_evidence_uploads.insert_one(doc)
+    action = "upload_document" if doc["file_category"] == "document" else "upload_video"
+    await audit(user["id"], action, "teacher_evidence_uploads", doc["id"], None, {**doc, "size_mb": _format_mb(len(raw))})
+    after = await _evidence_summary(teacher["id"], period, include_files=True)
+    await db.teacher_evidence_submissions.update_one(
+        {"teacher_id": teacher["id"], "assessment_period_id": period["id"]},
+        {
+            "$set": {
+                "teacher_id": teacher["id"],
+                "assessment_period_id": period["id"],
+                "document_count": after["document_count"],
+                "video_count": after["video_count"],
+                "readiness_status": after["readiness_status"],
+                "updated_at": now,
+            },
+            "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": now},
+        },
+        upsert=True,
+    )
+    await _notify_assessors_evidence_ready(teacher, period, user["id"], before["readiness_status"], after)
+    school = await db.schools.find_one({"id": teacher.get("school_id")}, {"_id": 0})
+    return {"teacher": teacher, "school": school, "active_period": period, "summary": after}
+
+@api.delete("/evidence/me/{file_id}")
+async def delete_my_evidence(file_id: str, user=Depends(require_roles("guru"))):
+    period = await _get_active_period()
+    teacher = await _teacher_for_user(user)
+    file_doc = await db.teacher_evidence_uploads.find_one({"id": file_id}, {"_id": 0})
+    if not file_doc:
+        raise HTTPException(status_code=404, detail="File bukti pendukung tidak ditemukan")
+    if not teacher or file_doc.get("teacher_id") != teacher.get("id"):
+        raise HTTPException(status_code=403, detail="Anda hanya boleh menghapus file milik sendiri")
+    if not period or file_doc.get("assessment_period_id") != period.get("id"):
+        raise HTTPException(status_code=400, detail="File tidak berada pada semester aktif")
+    summary = await _evidence_summary(teacher["id"], period, include_files=False)
+    if summary.get("locked") or file_doc.get("status") == "locked":
+        raise HTTPException(status_code=400, detail="Bukti pendukung sudah terkunci karena penilaian sudah dimulai.")
+    now = now_iso()
+    upd = {"status": "deleted", "deleted_at": now, "updated_at": now}
+    await db.teacher_evidence_uploads.update_one({"id": file_id}, {"$set": upd})
+    await audit(user["id"], "delete_evidence", "teacher_evidence_uploads", file_id, file_doc, upd)
+    after = await _evidence_summary(teacher["id"], period, include_files=False)
+    await db.teacher_evidence_submissions.update_one(
+        {"teacher_id": teacher["id"], "assessment_period_id": period["id"]},
+        {"$set": {
+            "document_count": after["document_count"],
+            "video_count": after["video_count"],
+            "readiness_status": after["readiness_status"],
+            "updated_at": now,
+        }},
+    )
+    return await my_evidence(user)
+
+@api.get("/evidence/files/{file_id}/download")
+async def download_evidence_file(
+    file_id: str,
+    disposition: str = Query("attachment", pattern="^(attachment|inline)$"),
+    user=Depends(get_current_user),
+):
+    file_doc = await db.teacher_evidence_uploads.find_one({"id": file_id, "deleted_at": None}, {"_id": 0})
+    if not file_doc or file_doc.get("status") not in ("active", "locked"):
+        raise HTTPException(status_code=404, detail="File bukti pendukung tidak ditemukan")
+    await _assert_evidence_file_access(file_doc, user)
+    filename = file_doc.get("original_filename") or "bukti-pendukung"
+    content_disposition = f'{disposition}; filename="{filename}"'
+    target = _storage_url_or_path(file_doc["storage_key"], content_disposition)
+    await audit(user["id"], "download_evidence", "teacher_evidence_uploads", file_id, None, {
+        "file_category": file_doc.get("file_category"),
+        "teacher_id": file_doc.get("teacher_id"),
+        "assessment_period_id": file_doc.get("assessment_period_id"),
+        "disposition": disposition,
+    })
+    if isinstance(target, Path):
+        return FileResponse(target, media_type=file_doc.get("mime_type"), filename=filename)
+    return RedirectResponse(target)
+
+@api.get("/evidence/admin")
+async def admin_evidence(
+    period_id: Optional[str] = None,
+    school_id: Optional[str] = None,
+    teacher_id: Optional[str] = None,
+    file_category: Optional[str] = None,
+    user=Depends(require_roles("admin")),
+):
+    query = {"deleted_at": None, "status": {"$in": ["active", "locked"]}}
+    if period_id:
+        query["assessment_period_id"] = period_id
+    if school_id:
+        query["school_id"] = school_id
+    if teacher_id:
+        query["teacher_id"] = teacher_id
+    if file_category and file_category in EVIDENCE_CATEGORIES:
+        query["file_category"] = file_category
+    files = await db.teacher_evidence_uploads.find(query, {"_id": 0}).sort("uploaded_at", -1).to_list(2000)
+    teacher_ids = {f.get("teacher_id") for f in files}
+    school_ids = {f.get("school_id") for f in files}
+    period_ids = {f.get("assessment_period_id") for f in files}
+    uploader_ids = {f.get("uploaded_by") for f in files}
+    teachers = {t["id"]: t async for t in db.teachers.find({"id": {"$in": list(teacher_ids)}}, {"_id": 0})} if teacher_ids else {}
+    schools = {s["id"]: s async for s in db.schools.find({"id": {"$in": list(school_ids)}}, {"_id": 0})} if school_ids else {}
+    periods = {p["id"]: p async for p in db.assessment_periods.find({"id": {"$in": list(period_ids)}}, {"_id": 0})} if period_ids else {}
+    uploaders = {u["id"]: u async for u in db.users.find({"id": {"$in": list(uploader_ids)}}, {"_id": 0, "password_hash": 0})} if uploader_ids else {}
+    for f in files:
+        teacher = teachers.get(f.get("teacher_id"), {})
+        school = schools.get(f.get("school_id"), {})
+        period = periods.get(f.get("assessment_period_id"), {})
+        uploader = uploaders.get(f.get("uploaded_by"), {})
+        f["teacher_name"] = teacher.get("name")
+        f["teacher_nip"] = teacher.get("nip")
+        f["school_name"] = school.get("school_name")
+        f["period_name"] = period.get("period_name")
+        f["uploaded_by_name"] = uploader.get("name")
+    return {
+        "files": files,
+        "active_period": await _get_active_period(),
+        "max_document_size_mb": MAX_DOCUMENT_SIZE_MB,
+        "max_video_size_mb": MAX_VIDEO_SIZE_MB,
+    }
+
 # =============================================================================
 # PHASE 2 — Periode Penilaian & Komponen Observasi PJOK
 # =============================================================================
@@ -1144,6 +1574,7 @@ async def _enrich_assignments(items):
         it["feedback_count"] = int(it.get("feedback_count") or 0)
         it["score_count"] = score_counts.get(it.get("id"), 0)
         it["final_percentage"] = round((score_totals.get(it.get("id"), 0) / max_score) * 100, 2) if max_score else 0
+        it["evidence_summary"] = await _evidence_summary(it.get("teacher_id"), p, include_files=False)
     return items
 
 async def _validate_assignment(teacher_id, assessor_user_id, period_id, creator):
@@ -1633,6 +2064,8 @@ async def _assessment_form_payload(assignment: dict):
     feedbacks = await db.teacher_assessment_feedbacks.find({"assignment_id": assignment["id"]}, {"_id": 0}).sort("feedback_round", 1).to_list(10)
     evaluation = await _active_evaluation_followup(assignment["id"])
     signatures = await db.digital_signatures.find({"assignment_id": assignment["id"]}, {"_id": 0}).sort("signed_at", 1).to_list(20)
+    period = await db.assessment_periods.find_one({"id": assignment.get("assessment_period_id")}, {"_id": 0})
+    evidence_summary = await _evidence_summary(assignment.get("teacher_id"), period, include_files=True)
     score_map = {s["aspect_id"]: s for s in scores}
     active_aspect_ids = {a["id"] for a in aspects}
     active_scores = [s for s in scores if s.get("aspect_id") in active_aspect_ids and isinstance(s.get("score"), int)]
@@ -1664,6 +2097,7 @@ async def _assessment_form_payload(assignment: dict):
         "signatures": signatures,
         "evaluation_followup": evaluation,
         "evaluation_complete": _evaluation_is_complete(evaluation),
+        "evidence_summary": evidence_summary,
         "summary": {
             "total_score": total_score,
             "scored_count": scored_count,
@@ -2096,6 +2530,7 @@ async def start_assignment(aid: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Hanya penilai yang ditugaskan dapat memulai penilaian")
     if existing.get("status") not in ("Belum Dimulai",):
         raise HTTPException(status_code=400, detail="Penilaian sudah dimulai sebelumnya")
+    await _assert_evidence_ready_for_assignment(existing)
     upd = {
         "status": "Draft",
         "teacher_review_status": "Belum Dikirim",
@@ -2103,6 +2538,7 @@ async def start_assignment(aid: str, user=Depends(get_current_user)):
         "updated_at": now_iso(),
     }
     await db.assessment_assignments.update_one({"id": aid}, {"$set": upd})
+    await _lock_evidence_for_assignment(existing, user["id"])
     await audit(user["id"], "start", "assessment_assignments", aid, {"status": existing.get("status")}, upd)
     teacher_user_id = await _teacher_user_id(existing.get("teacher_id"))
     await notify_user(
@@ -2940,6 +3376,9 @@ async def on_startup():
     )
     await db.evaluation_followups.create_index("assignment_id", unique=True)
     await db.digital_signatures.create_index([("assignment_id", 1), ("user_id", 1)], unique=True)
+    await db.teacher_evidence_uploads.create_index([("teacher_id", 1), ("assessment_period_id", 1), ("file_category", 1), ("status", 1)])
+    await db.teacher_evidence_uploads.create_index([("school_id", 1), ("assessment_period_id", 1)])
+    await db.teacher_evidence_submissions.create_index([("teacher_id", 1), ("assessment_period_id", 1)], unique=True)
     await db.audit_logs.create_index([("created_at", -1), ("user_id", 1), ("action", 1), ("table_name", 1)])
     await db.notifications.create_index([("user_id", 1), ("is_read", 1), ("created_at", -1)])
     await db.emergency_unlock_logs.create_index([("assignment_id", 1), ("unlocked_at", -1)])

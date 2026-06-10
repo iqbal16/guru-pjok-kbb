@@ -425,6 +425,9 @@ export default function Assignments() {
                     const canOpenExport = a.status === "Final";
                     const canEmergencyUnlock = isAdmin && a.status === "Final";
                     const canForceFinal = isAdmin && a.status !== "Final";
+                    const evidenceStatus = a.evidence_summary?.readiness_status;
+                    const evidenceReady = ["ready", "locked"].includes(evidenceStatus);
+                    const startDisabledReason = !evidenceReady ? "Penilaian belum dapat dimulai karena Guru belum melengkapi dokumen dan video pendukung." : "";
                     const openLabel = canViewReadOnly ? "Lihat Hasil" : (a.status === "Feedback dari Guru" ? "Buka Feedback" : (["Menunggu Review Guru", "Final"].includes(a.status) ? "Lihat Hasil" : "Lanjutkan Penilaian"));
                     const sendLabel = a.status === "Draft Revisi" ? "Kirim Revisi" : "Kirim ke Guru";
                     return (
@@ -456,6 +459,11 @@ export default function Assignments() {
                             {a.signatures_need_update && (
                               <Badge className="bg-orange-50 text-orange-700 ring-1 ring-orange-200 border-0 text-[10px]">TTD perlu update</Badge>
                             )}
+                            {a.status === "Belum Dimulai" && (
+                              <Badge className={`${evidenceReady ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-amber-50 text-amber-700 ring-amber-200"} ring-1 border-0 text-[10px]`}>
+                                Bukti: {a.evidence_summary?.readiness_label || "Belum Lengkap"}
+                              </Badge>
+                            )}
                             <div className="text-[11px] text-slate-500">Feedback Guru: {a.feedback_count || 0}/2</div>
                           </div>
                         </TableCell>
@@ -465,7 +473,7 @@ export default function Assignments() {
                               <Eye className="w-3.5 h-3.5 mr-1" /> Detail
                             </Button>
                             {canStart ? (
-                              <Button size="sm" onClick={() => startAssignment(a)} className="h-8 bg-emerald-700 hover:bg-emerald-800" data-testid={`start-${a.id}`}>
+                              <Button size="sm" onClick={() => startAssignment(a)} disabled={!evidenceReady} title={startDisabledReason} className="h-8 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60" data-testid={`start-${a.id}`}>
                                 <Play className="w-3.5 h-3.5 mr-1" /> Mulai
                               </Button>
                             ) : canOpenAssessment ? (

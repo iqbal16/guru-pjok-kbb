@@ -4,6 +4,7 @@ import api, { formatApiErrorDetail } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import EvaluationFollowupSection from "@/components/EvaluationFollowupSection";
 import DigitalSignatureSection from "@/components/DigitalSignatureSection";
+import EvidenceFileList from "@/components/EvidenceFileList";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -236,6 +237,7 @@ export default function AssessmentForm() {
   const reviewComplete = !!assignment.teacher_review_completed || ["Disetujui Guru", "Feedback Maksimal Diproses", "Selesai"].includes(assignment.teacher_review_status);
   const canFinalize = user?.id === assignment.assessor_user_id && assignment.status !== "Final" && storedScoresComplete && data.evaluation_complete && hasMySignature && reviewComplete;
   const canSend = canEditScores && storedScoresComplete && data.evaluation_complete && !scoreDirty && !rtlDirty;
+  const evidence = data.evidence_summary || {};
   const sendLabel = assignment.status === "Draft Revisi" ? "Kirim Revisi ke Guru" : "Kirim ke Guru";
   const sendDisabledReason = scoreDirty
     ? "Simpan penilaian terlebih dahulu sebelum lanjut ke Evaluasi & RTL."
@@ -322,6 +324,31 @@ export default function AssessmentForm() {
           {summary.unscored > 0 && canEditScores && <Badge className="bg-amber-100 text-amber-800 border-0">Semua aspek resmi wajib diberi skor sebelum dikirim</Badge>}
           {assignment.status === "Final" && <Badge className="bg-emerald-700 text-white border-0">Final dan terkunci</Badge>}
         </div>
+      </Card>
+
+      <Card className="p-5" data-testid="assessment-evidence-section">
+        <div className="mb-4 flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="font-heading text-xl font-semibold text-slate-900">Bukti Pendukung Guru</h2>
+            <p className="text-sm text-slate-500 mt-1">Dokumen dan video yang diunggah Guru untuk periode penilaian aktif.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Badge className={`${evidence.readiness_status === "ready" ? "bg-emerald-100 text-emerald-800" : evidence.readiness_status === "locked" ? "bg-slate-100 text-slate-800" : "bg-amber-100 text-amber-800"} border-0`}>
+              {evidence.readiness_label || "Belum Lengkap"}
+            </Badge>
+            <Badge variant="outline">Dokumen: {evidence.document_count || 0}</Badge>
+            <Badge variant="outline">Video: {evidence.video_count || 0}</Badge>
+          </div>
+        </div>
+        {(evidence.missing || []).length > 0 && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            <div className="font-semibold">Penilaian belum dapat dimulai karena Guru belum melengkapi dokumen dan video pendukung.</div>
+            <ul className="mt-1 list-disc pl-5">
+              {evidence.missing.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
+        )}
+        <EvidenceFileList files={evidence.files || []} emptyText="Guru belum mengunggah bukti pendukung." />
       </Card>
 
       {scoreDirty && canEditScores && (

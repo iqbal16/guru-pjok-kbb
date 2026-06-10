@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Panduan Pengguna Aplikasi PJOK KBB</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --text: #0f172a;
+      --muted: #475569;
+      --border: #dbe3ef;
+      --soft: #f8fafc;
+      --brand: #047857;
+      --brand-dark: #064e3b;
+    }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #eef4f2;
+      color: var(--text);
+      line-height: 1.65;
+    }
+    .shell {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      background: var(--brand-dark);
+      color: white;
+      padding: 28px 22px;
+      box-sizing: border-box;
+    }
+    aside h2 {
+      font-size: 18px;
+      line-height: 1.2;
+      margin: 0 0 18px;
+    }
+    aside a {
+      display: block;
+      color: #d1fae5;
+      text-decoration: none;
+      font-size: 13px;
+      padding: 7px 0;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+    }
+    aside a:hover { color: white; }
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 44px 34px 80px;
+      box-sizing: border-box;
+    }
+    article {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 44px;
+      box-shadow: 0 18px 50px rgba(15, 23, 42, .08);
+    }
+    h1, h2, h3 {
+      line-height: 1.25;
+      color: #081326;
+    }
+    h1 {
+      font-size: clamp(30px, 4vw, 48px);
+      margin: 0 0 22px;
+      padding-bottom: 18px;
+      border-bottom: 4px solid var(--brand);
+    }
+    h2 {
+      margin-top: 48px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+      font-size: 28px;
+    }
+    h3 {
+      margin-top: 30px;
+      font-size: 21px;
+    }
+    p, li { color: var(--muted); }
+    code {
+      background: #e2e8f0;
+      border-radius: 6px;
+      padding: 2px 6px;
+      color: #0f172a;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 18px 0 28px;
+      overflow: hidden;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+    }
+    th, td {
+      border-bottom: 1px solid var(--border);
+      padding: 12px 14px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #ecfdf5;
+      color: #064e3b;
+    }
+    tr:last-child td { border-bottom: 0; }
+    img {
+      display: block;
+      width: 100%;
+      max-width: 100%;
+      height: auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin: 18px 0 34px;
+      box-shadow: 0 10px 28px rgba(15,23,42,.12);
+    }
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    button {
+      border: 0;
+      border-radius: 8px;
+      background: var(--brand);
+      color: white;
+      font-weight: 700;
+      padding: 10px 14px;
+      cursor: pointer;
+      box-shadow: 0 8px 18px rgba(4,120,87,.22);
+    }
+    button:hover { background: #065f46; }
+    pre {
+      white-space: pre-wrap;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 18px;
+      border-radius: 10px;
+      overflow: auto;
+    }
+    @media (max-width: 900px) {
+      .shell { display: block; }
+      aside {
+        position: relative;
+        height: auto;
+      }
+      main { padding: 18px; }
+      article { padding: 24px; }
+    }
+    @media print {
+      body { background: white; }
+      .shell { display: block; }
+      aside, .toolbar { display: none; }
+      main { max-width: none; padding: 0; }
+      article { border: 0; box-shadow: none; padding: 0; }
+      img { box-shadow: none; break-inside: avoid; }
+      h2, h3, table { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <h2>Panduan Pengguna<br />PJOK KBB</h2>
+      <nav id="toc"></nav>
+    </aside>
+    <main>
+      <div class="toolbar">
+        <button onclick="window.print()">Cetak / Simpan PDF</button>
+      </div>
+      <article id="content"></article>
+    </main>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script>
+    const markdown = "# Panduan Pengguna Aplikasi Penilaian Kinerja Guru PJOK SD KBB\n\nDokumen ini menjelaskan cara menggunakan aplikasi Penilaian Kinerja Guru PJOK SD Kabupaten Bandung Barat untuk empat role utama:\n\n- Admin\n- Pengawas\n- Kepala Sekolah\n- Guru\n\nPanduan ini menggunakan contoh tampilan dari environment DEV online. Menu yang muncul dapat berbeda sesuai role dan hak akses pengguna.\n\n## 1. Akses Aplikasi\n\n1. Buka URL aplikasi.\n2. Masukkan email dan kata sandi yang diberikan oleh Admin.\n3. Klik **Masuk**.\n4. Setelah berhasil login, pengguna diarahkan ke **Dashboard** sesuai role.\n\n![Halaman Login](assets/user-guide/login.png)\n\nCatatan keamanan:\n\n- Jangan membagikan email dan kata sandi kepada pengguna lain.\n- Jika akun tidak bisa login, hubungi Admin untuk mengecek status akun.\n- Setelah selesai menggunakan aplikasi, klik menu profil di kanan atas lalu pilih **Keluar**.\n\n## 2. Ringkasan Role dan Hak Akses\n\n| Role | Fungsi Utama |\n| --- | --- |\n| Admin | Mengelola master data, periode, instrumen, assignment, Evaluasi & RTL, report, audit log, dan hak akses. |\n| Pengawas | Melakukan penilaian untuk assignment yang ditugaskan kepadanya, mengisi skor, memproses feedback guru, mengisi RTL, dan melihat report sesuai akses. |\n| Kepala Sekolah | Melakukan penilaian untuk assignment yang ditugaskan kepadanya, melihat guru di sekolahnya, memproses feedback, mengisi RTL untuk assignment miliknya, dan melihat report sesuai akses. |\n| Guru | Melihat assignment miliknya, mereview hasil penilaian, memberi feedback maksimal 2 kali, mengusulkan aspek observasi, dan melihat report miliknya. |\n\n## 3. Panduan Admin\n\n### 3.1 Dashboard Admin\n\nDashboard Admin menampilkan ringkasan kondisi penilaian, termasuk jumlah data utama, assignment, status workflow, dan ringkasan penilaian.\n\n![Dashboard Admin](assets/user-guide/admin-dashboard.png)\n\nYang perlu dicek Admin dari dashboard:\n\n1. Pastikan periode aktif sudah tersedia.\n2. Pantau jumlah assignment Kepala Sekolah dan Pengawas.\n3. Pantau guru yang assignment-nya belum lengkap.\n4. Pantau status Draft, Final, dan progress penilaian.\n\n### 3.2 Manajemen Pengguna\n\nMenu **Manajemen Pengguna** digunakan untuk mengelola akun login aplikasi.\n\n![Manajemen Pengguna Admin](assets/user-guide/admin-users.png)\n\nLangkah umum:\n\n1. Buka menu **Manajemen Pengguna**.\n2. Tambahkan akun sesuai role: Admin, Pengawas, Kepala Sekolah, atau Guru.\n3. Pastikan email unik dan status akun aktif.\n4. Hubungkan akun dengan profil terkait jika diperlukan, misalnya Guru dengan data guru.\n5. Simpan perubahan.\n\nTips:\n\n- Nonaktifkan akun yang sudah tidak digunakan.\n- Jangan membuat akun ganda untuk orang yang sama.\n- Pastikan role sesuai tugas pengguna.\n\n### 3.3 Master Data\n\nAdmin bertanggung jawab menjaga master data tetap benar sebelum proses penilaian berjalan.\n\nMaster data yang dikelola Admin:\n\n- Data Sekolah\n- Data Guru\n- Data Pengawas\n- Data Kepala Sekolah\n- Tahun Ajaran\n- Semester\n- Periode Penilaian\n- Komponen Observasi\n- Aspek Penilaian\n\nUrutan yang disarankan:\n\n1. Lengkapi data sekolah.\n2. Lengkapi data guru dan hubungkan ke sekolah.\n3. Lengkapi data kepala sekolah dan hubungkan ke sekolah.\n4. Lengkapi data pengawas dan wilayah binaan.\n5. Buat tahun ajaran dan semester.\n6. Buat periode penilaian dan aktifkan satu periode.\n7. Pastikan komponen dan aspek penilaian aktif.\n\n### 3.4 Assignment Penilaian\n\nMenu **Assignment Penilaian** digunakan untuk membuat dan memantau assignment penilaian.\n\n![Assignment Penilaian Admin](assets/user-guide/admin-assignments.png)\n\nBusiness rule penting:\n\n- Satu guru dapat memiliki maksimal dua assignment utama pada periode aktif yang sama.\n- Satu assignment oleh **Kepala Sekolah**.\n- Satu assignment oleh **Pengawas**.\n- Sistem menolak duplikat assignment untuk role penilai yang sama pada guru dan periode yang sama.\n\nLangkah membuat assignment:\n\n1. Buka menu **Assignment Penilaian**.\n2. Klik **Tambah Assignment**.\n3. Pilih guru.\n4. Sistem membaca sekolah guru secara otomatis.\n5. Sistem mencari Kepala Sekolah sesuai sekolah guru.\n6. Sistem mencari Pengawas sesuai wilayah sekolah guru.\n7. Pilih jenis assignment yang ingin dibuat:\n   - **Penilaian oleh Kepala Sekolah**\n   - **Penilaian oleh Pengawas**\n   - atau keduanya jika tersedia.\n8. Isi tanggal observasi jika sudah ditentukan.\n9. Simpan assignment.\n\nHal yang perlu diperhatikan:\n\n- Jika Kepala Sekolah tidak ditemukan, lengkapi data Kepala Sekolah terlebih dahulu.\n- Jika Pengawas tidak ditemukan, cek wilayah sekolah dan data Pengawas.\n- Jika Pengawas lebih dari satu, pilih pengawas yang sesuai dari dropdown.\n\n### 3.5 Form Penilaian Detail\n\nAdmin dapat membuka form penilaian untuk melihat atau membantu pengecekan data.\n\n![Form Penilaian Admin](assets/user-guide/admin-assessment-form.png)\n\nDi form penilaian terdapat:\n\n- Informasi guru\n- NIP\n- Sekolah\n- Mata pelajaran\n- Periode penilaian\n- Penilai\n- Role penilai\n- Tanggal observasi\n- Status assignment\n- Aspek resmi per kategori\n- Aspek tambahan atau usulan guru jika sudah approved\n- Skor 1 sampai 4\n- Catatan penilai\n- Kalkulasi nilai sementara\n- Evaluasi & RTL\n- Tombol workflow sesuai status\n\nAturan skor:\n\n| Skor | Label |\n| --- | --- |\n| 1 | Kurang |\n| 2 | Cukup |\n| 3 | Baik |\n| 4 | Sangat Baik |\n\nCatatan:\n\n- Semua aspek resmi wajib diberi skor sebelum penilaian dikirim ke Guru.\n- Catatan per aspek bersifat optional.\n- Aspek usulan guru tidak masuk nilai utama.\n\n### 3.6 Manajemen Evaluasi & RTL\n\nMenu **Manajemen Evaluasi & RTL** digunakan Admin untuk memantau dan mengelola data Evaluasi dan Rencana Tindak Lanjut.\n\n![Manajemen Evaluasi RTL Admin](assets/user-guide/admin-evaluation-rtl.png)\n\nAdmin dapat:\n\n1. Melihat assignment yang sudah atau belum memiliki Evaluasi & RTL.\n2. Menambah RTL jika assignment belum Final.\n3. Mengedit RTL jika assignment belum Final.\n4. Menghapus RTL secara soft delete jika assignment belum Final.\n5. Memfilter berdasarkan periode, sekolah, guru, penilai, status penilaian, dan status RTL.\n\nEvaluasi & RTL terkunci jika assignment sudah **Final**.\n\nField Evaluasi:\n\n- Kesimpulan hasil observasi\n- Aspek kelebihan\n- Aspek yang perlu diperbaiki\n- Penyebab kendala\n- Rekomendasi umum\n\nField RTL:\n\n- Kegiatan pembinaan\n- Sasaran target\n- Waktu pelaksanaan\n- Keterangan\n- Status RTL\n\nStatus RTL:\n\n- Belum Dimulai\n- Dalam Proses\n- Selesai\n\n### 3.7 Report Penilaian\n\nMenu **Report Penilaian** digunakan untuk melihat rekap hasil penilaian dan export PDF jika eligible.\n\n![Report Admin](assets/user-guide/admin-reports.png)\n\nLangkah umum:\n\n1. Buka menu **Report Penilaian**.\n2. Gunakan filter jika diperlukan.\n3. Klik detail report untuk melihat hasil penilaian.\n4. Klik **Export PDF** jika tombol tersedia dan data sudah memenuhi syarat.\n\n### 3.8 Audit Log\n\nMenu **Audit Log** hanya tersedia untuk Admin.\n\n![Audit Log Admin](assets/user-guide/admin-audit-log.png)\n\nAudit log mencatat aktivitas penting, seperti:\n\n- Login\n- Membuat assignment\n- Mengubah assignment\n- Menyimpan skor\n- Mengirim penilaian ke Guru\n- Feedback Guru\n- Menyimpan Evaluasi & RTL\n- Finalisasi\n- Export report\n\nGunakan audit log untuk menelusuri aktivitas jika terjadi masalah data.\n\n## 4. Panduan Pengawas\n\n### 4.1 Dashboard Pengawas\n\nDashboard Pengawas menampilkan ringkasan assignment dan aktivitas penilaian yang berkaitan dengan akun Pengawas tersebut.\n\n![Dashboard Pengawas](assets/user-guide/pengawas-dashboard.png)\n\nPengawas hanya dapat mengisi atau memproses assignment yang ditugaskan kepadanya sebagai penilai.\n\n### 4.2 Penilaian Saya\n\nMenu **Penilaian Saya** berisi daftar assignment yang menjadi tanggung jawab Pengawas.\n\n![Assignment Pengawas](assets/user-guide/pengawas-assignments.png)\n\nAction yang mungkin tersedia:\n\n- Lihat Detail\n- Mulai Penilaian\n- Isi Penilaian\n- Lanjutkan Penilaian\n- Kirim ke Guru\n- Kirim Revisi ke Guru\n- Lihat Report\n- Export PDF jika eligible\n\nCatatan permission:\n\n- Pengawas tidak dapat mengisi assignment milik Kepala Sekolah.\n- Pengawas tidak dapat mengisi assignment milik Pengawas lain.\n- Jika assignment bukan miliknya, action edit atau isi penilaian tidak ditampilkan.\n\n### 4.3 Mengisi Form Penilaian\n\n![Form Penilaian Pengawas](assets/user-guide/pengawas-assessment-form.png)\n\nLangkah mengisi penilaian:\n\n1. Buka **Penilaian Saya**.\n2. Pilih assignment.\n3. Klik **Mulai Penilaian**, **Isi Penilaian**, atau **Lanjutkan Penilaian** sesuai status.\n4. Isi skor 1 sampai 4 pada setiap aspek resmi.\n5. Isi catatan jika diperlukan.\n6. Klik **Simpan Penilaian**.\n7. Lengkapi Evaluasi & RTL jika skor resmi sudah lengkap.\n8. Klik **Kirim ke Guru** jika semua syarat sudah terpenuhi.\n\nValidasi penting:\n\n- Semua aspek resmi wajib diberi skor sebelum dikirim ke Guru.\n- Catatan boleh kosong.\n- Assignment Final tidak bisa diedit.\n- Saat status **Menunggu Review Guru**, skor tidak bisa diedit sampai Guru memberi feedback.\n\n### 4.4 Memproses Feedback Guru\n\nJika Guru memberi feedback:\n\n1. Status berubah menjadi **Feedback dari Guru**.\n2. Buka assignment terkait.\n3. Baca feedback Guru.\n4. Klik atau mulai proses revisi jika tersedia.\n5. Perbaiki skor atau catatan jika diperlukan.\n6. Klik **Kirim Revisi ke Guru**.\n\nAturan feedback:\n\n- Guru dapat memberi feedback maksimal dua kali.\n- Setelah feedback kedua diproses dan syarat finalisasi lengkap, assignment dapat menjadi Final.\n\n### 4.5 Review Usulan Aspek Guru\n\nMenu **Review Usulan Aspek** digunakan untuk menyetujui atau menolak usulan aspek dari guru yang assignment-nya diberikan kepada Pengawas tersebut.\n\n![Review Usulan Pengawas](assets/user-guide/pengawas-review-usulan.png)\n\nLangkah:\n\n1. Buka **Review Usulan Aspek**.\n2. Pilih usulan dengan status **Pending**.\n3. Baca nama aspek, kategori, deskripsi, dan alasan.\n4. Isi catatan review jika diperlukan.\n5. Klik **Approve** atau **Reject**.\n\nJika approved:\n\n- Aspek muncul di Form Penilaian Detail sebagai **Usulan Guru**.\n- Aspek dapat diberi skor dan catatan.\n- Skor aspek usulan tidak masuk nilai utama.\n\n### 4.6 Report Pengawas\n\n![Report Pengawas](assets/user-guide/pengawas-reports.png)\n\nPengawas dapat melihat report sesuai assignment yang menjadi kewenangannya.\n\n## 5. Panduan Kepala Sekolah\n\n### 5.1 Dashboard Kepala Sekolah\n\nDashboard Kepala Sekolah menampilkan ringkasan guru dan penilaian di sekolahnya.\n\n![Dashboard Kepala Sekolah](assets/user-guide/kepsek-dashboard.png)\n\nKepala Sekolah dapat:\n\n- Melihat data guru di sekolahnya.\n- Melakukan penilaian jika ditugaskan sebagai assessor.\n- Melihat assignment guru di sekolahnya sesuai akses.\n- Melihat report sesuai kewenangan.\n\n### 5.2 Penilaian Saya\n\n![Assignment Kepala Sekolah](assets/user-guide/kepsek-assignments.png)\n\nAturan penting:\n\n- Kepala Sekolah hanya boleh mengisi assignment jika `assessor_user_id` assignment adalah dirinya.\n- Jika assignment guru tersebut ditugaskan kepada Pengawas, Kepala Sekolah hanya boleh melihat sesuai akses, bukan mengisi atau mengedit.\n- Assignment Final tidak bisa diedit.\n\nLangkah mengisi penilaian:\n\n1. Buka **Penilaian Saya**.\n2. Pilih assignment yang memang ditugaskan kepada Kepala Sekolah.\n3. Klik **Mulai Penilaian** atau **Isi Penilaian**.\n4. Isi skor setiap aspek resmi.\n5. Simpan penilaian.\n6. Lengkapi Evaluasi & RTL.\n7. Kirim ke Guru jika semua syarat terpenuhi.\n\n### 5.3 Review Usulan Aspek\n\n![Review Usulan Kepala Sekolah](assets/user-guide/kepsek-review-usulan.png)\n\nKepala Sekolah dapat mereview usulan aspek dari guru di sekolahnya sesuai kewenangan.\n\nLangkah:\n\n1. Buka **Review Usulan Aspek**.\n2. Baca usulan Guru.\n3. Isi catatan review.\n4. Approve atau Reject.\n\n### 5.4 Report Kepala Sekolah\n\n![Report Kepala Sekolah](assets/user-guide/kepsek-reports.png)\n\nKepala Sekolah dapat melihat report yang sesuai dengan sekolah dan kewenangannya.\n\n## 6. Panduan Guru\n\n### 6.1 Dashboard Guru\n\nDashboard Guru menampilkan status penilaian miliknya.\n\n![Dashboard Guru](assets/user-guide/guru-dashboard.png)\n\nGuru dapat melihat:\n\n- Status Penilaian Kepala Sekolah\n- Status Penilaian Pengawas\n- Progress review\n- Notifikasi\n- Akses ke penilaian dan report miliknya\n\n### 6.2 Profil Saya\n\nMenu **Profil Saya** berisi informasi identitas Guru.\n\n![Profil Guru](assets/user-guide/guru-profil.png)\n\nGuru dapat mengecek:\n\n- Nama\n- NIP\n- Sekolah\n- Mata pelajaran\n- Data profil lain yang tersedia\n\nJika data salah, hubungi Admin.\n\n### 6.3 Penilaian Saya\n\nMenu **Penilaian Saya** menampilkan status assignment Guru.\n\n![Penilaian Saya Guru](assets/user-guide/guru-penilaian-saya.png)\n\nGuru dapat melihat dua status terpisah:\n\n- Penilaian Kepala Sekolah\n- Penilaian Pengawas\n\nTombol **Lihat Detail** muncul jika hasil penilaian sudah tersedia untuk direview atau sudah final.\n\n### 6.4 Review Hasil Penilaian\n\n![Detail Review Guru](assets/user-guide/guru-review-detail.png)\n\nDi halaman detail review, Guru dapat melihat:\n\n- Data Guru\n- Periode penilaian\n- Nama penilai\n- Role penilai\n- Skor per aspek\n- Catatan per aspek\n- Nilai akhir\n- Aspek tambahan atau usulan Guru\n- Evaluasi & RTL\n- Riwayat feedback\n\nJika status **Menunggu Review Guru**, Guru dapat:\n\n1. Klik **Setujui / OK** jika hasil penilaian sudah sesuai.\n2. Klik **Beri Feedback** jika ada catatan yang perlu ditanggapi penilai.\n\nAturan feedback:\n\n- Guru maksimal memberi feedback dua kali per assignment.\n- Setelah status Final, Guru tidak bisa memberi feedback lagi.\n- Guru tidak bisa mengubah skor.\n\n### 6.5 Usulan Aspek Observasi\n\nMenu **Usulan Aspek Observasi** digunakan Guru untuk mengusulkan aspek tambahan yang ingin diamati.\n\n![Usulan Aspek Guru](assets/user-guide/guru-usulan-aspek.png)\n\nLangkah submit usulan:\n\n1. Buka **Usulan Aspek Observasi**.\n2. Pilih kategori:\n   - Persiapan\n   - Pelaksanaan\n   - Penilaian\n3. Isi nama aspek.\n4. Isi deskripsi aspek.\n5. Isi alasan usulan.\n6. Simpan usulan.\n\nStatus usulan:\n\n| Status | Arti |\n| --- | --- |\n| Pending | Menunggu review Admin/Pengawas/Kepala Sekolah. |\n| Approved | Usulan disetujui dan dapat muncul di form penilaian. |\n| Rejected | Usulan ditolak. |\n| Cancelled | Usulan dibatalkan oleh Guru sebelum direview. |\n\nAturan:\n\n- Guru hanya bisa melihat usulan miliknya sendiri.\n- Guru boleh edit atau cancel selama status masih Pending.\n- Guru tidak bisa edit atau cancel jika status sudah Approved atau Rejected.\n- Usulan approved tidak masuk nilai utama, hanya sebagai aspek tambahan.\n\n### 6.6 Report Guru\n\n![Report Guru](assets/user-guide/guru-reports.png)\n\nGuru dapat membuka report miliknya sendiri jika report sudah tersedia.\n\nGuru tidak dapat melihat report milik Guru lain.\n\n## 7. Status Workflow Penilaian\n\n| Status | Penjelasan |\n| --- | --- |\n| Belum Dimulai | Assignment sudah dibuat, tetapi penilaian belum dimulai. |\n| Draft | Penilai sedang mengisi atau menyimpan penilaian. |\n| Menunggu Review Guru | Penilaian sudah dikirim ke Guru untuk direview. |\n| Feedback dari Guru | Guru mengirim feedback dan menunggu penilai memproses revisi. |\n| Draft Revisi | Penilai sedang merevisi hasil berdasarkan feedback Guru. |\n| Final | Penilaian selesai dan terkunci. |\n\n## 8. Checklist Operasional\n\n### Sebelum Periode Penilaian Dimulai\n\n1. Admin memastikan master data sekolah, guru, kepala sekolah, dan pengawas lengkap.\n2. Admin memastikan periode aktif benar.\n3. Admin memastikan aspek penilaian aktif.\n4. Admin membuat assignment Kepala Sekolah dan/atau Pengawas.\n5. Penilai memastikan assignment muncul di menu masing-masing.\n\n### Saat Penilaian Berjalan\n\n1. Penilai mengisi skor semua aspek resmi.\n2. Penilai menyimpan penilaian sebagai Draft.\n3. Penilai melengkapi Evaluasi & RTL.\n4. Penilai mengirim penilaian ke Guru.\n5. Guru melakukan review.\n6. Jika ada feedback, penilai memproses revisi.\n7. Setelah selesai, penilaian menjadi Final.\n\n### Setelah Final\n\n1. Skor terkunci.\n2. Catatan terkunci.\n3. Evaluasi & RTL terkunci.\n4. Guru tetap bisa melihat hasil.\n5. Penilai dan Admin dapat melihat report sesuai akses.\n\n## 9. Troubleshooting Singkat\n\n| Masalah | Kemungkinan Penyebab | Tindakan |\n| --- | --- | --- |\n| Tidak bisa login | Email/password salah atau akun tidak aktif | Hubungi Admin. |\n| Menu tidak muncul | Role tidak memiliki akses menu tersebut | Cek role akun. |\n| Assignment tidak muncul | Assignment belum dibuat atau bukan milik user tersebut | Admin cek Assignment Penilaian. |\n| Tombol Kirim ke Guru disabled | Skor resmi belum lengkap atau RTL belum lengkap | Lengkapi skor dan Evaluasi & RTL. |\n| Guru tidak bisa feedback | Status bukan Menunggu Review Guru atau feedback sudah 2 kali | Cek status assignment. |\n| Export PDF disabled | Report belum eligible atau assignment belum final/syarat belum lengkap | Lengkapi workflow dan cek report. |\n\n## 10. Catatan Untuk Admin Sistem\n\n- Gunakan environment DEV untuk testing fitur baru.\n- Jangan mengubah data Final tanpa prosedur resmi.\n- Perubahan penting dapat dicek melalui Audit Log.\n- Pastikan data periode aktif hanya satu untuk periode yang sedang berjalan.\n- Pastikan assignment Kepala Sekolah dan Pengawas tetap terpisah.\n";
+    const content = document.getElementById("content");
+    if (window.marked) {
+      content.innerHTML = marked.parse(markdown);
+    } else {
+      content.innerHTML = "<pre></pre>";
+      content.querySelector("pre").textContent = markdown;
+    }
+    const toc = document.getElementById("toc");
+    for (const heading of content.querySelectorAll("h2, h3")) {
+      const id = heading.textContent.toLowerCase()
+        .replace(/[^a-z0-9\s-]/gi, "")
+        .trim()
+        .replace(/\s+/g, "-");
+      heading.id = id;
+      const link = document.createElement("a");
+      link.href = "#" + id;
+      link.textContent = heading.textContent;
+      link.style.paddingLeft = heading.tagName === "H3" ? "14px" : "0";
+      toc.appendChild(link);
+    }
+  </script>
+</body>
+</html>

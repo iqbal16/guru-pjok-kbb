@@ -22,6 +22,7 @@ import Assignments from "@/pages/Assignments";
 import MyAssessment from "@/pages/MyAssessment";
 import AssessmentForm from "@/pages/AssessmentForm";
 import ProposedAspects from "@/pages/ProposedAspects";
+import EvidenceUploads from "@/pages/EvidenceUploads";
 import TeacherAssessmentReview from "@/pages/TeacherAssessmentReview";
 import EvaluationFollowupsAdmin from "@/pages/EvaluationFollowupsAdmin";
 import Reports from "@/pages/Reports";
@@ -50,6 +51,7 @@ function App() {
               <Route path="/komponen-observasi" element={<ProtectedRoute roles={["admin", "pengawas", "kepala_sekolah", "guru"]}><ObservationCategories /></ProtectedRoute>} />
               <Route path="/aspek-penilaian" element={<ProtectedRoute roles={["admin"]}><ObservationAspects /></ProtectedRoute>} />
               <Route path="/assignments" element={<ProtectedRoute roles={["admin", "pengawas", "kepala_sekolah"]}><Assignments /></ProtectedRoute>} />
+              <Route path="/bukti-pendukung" element={<ProtectedRoute roles={["admin", "guru"]}><EvidenceUploads /></ProtectedRoute>} />
               <Route path="/assignments/:assignmentId/penilaian" element={<ProtectedRoute roles={["admin", "pengawas", "kepala_sekolah"]}><AssessmentForm /></ProtectedRoute>} />
               <Route path="/evaluasi-rtl" element={<ProtectedRoute roles={["admin"]}><EvaluationFollowupsAdmin /></ProtectedRoute>} />
               <Route path="/reports" element={<ProtectedRoute roles={["admin", "pengawas", "kepala_sekolah", "guru"]}><Reports /></ProtectedRoute>} />
